@@ -171,6 +171,19 @@ def show_result_details(username, result_id):
             st.rerun()
         return
     
+    # Add a debug expander to see raw result data (this can help debug issues)
+    with st.expander("Debug: Raw Result Data", expanded=False):
+        st.write("Result ID:", result_id)
+        st.write("Top-level keys:", list(result_data.keys()))
+        
+        if "image_paths" in result_data:
+            st.write("Image path keys:", list(result_data["image_paths"].keys()))
+            for key, path in result_data["image_paths"].items():
+                st.write(f"- {key}: {path} (Exists: {os.path.exists(path) if path else 'No path'})")
+        
+        if "visualizations" in result_data:
+            st.write("Visualization keys:", list(result_data["visualizations"].keys()))
+    
     st.title("📋 Detailed Analysis Result")
     
     # Add a back button
@@ -184,16 +197,64 @@ def show_result_details(username, result_id):
     # Display metadata
     st.subheader(f"{result_data.get('fruit_type', 'Unknown')} Analysis")
     
-    # Handle timestamp safely
-    try:
-        timestamp = result_data.get('timestamp', '')
-        if timestamp:
-            formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            st.write(f"**Date:** {formatted_date}")
-        else:
-            st.write("**Date:** Unknown")
-    except ValueError:
-        st.write("**Date:** Invalid format")
+    # Handle timestamp with various formats
+    found_timestamp = False
+    
+    # Try direct timestamp fields with different formats
+    timestamp_fields = ["timestamp", "date", "created_at"]
+    for field in timestamp_fields:
+        if field in result_data and result_data[field]:
+            try:
+                timestamp = result_data[field]
+                # Check if it's a string that needs formatting
+                if isinstance(timestamp, str):
+                    # Try to format with T separator first
+                    try:
+                        formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                        st.write(f"**Date:** {formatted_date}")
+                        found_timestamp = True
+                        break
+                    except ValueError:
+                        # If that fails, try with space instead of T
+                        try:
+                            # Replace space with T if needed
+                            if " " in timestamp and "T" not in timestamp:
+                                formatted_date = datetime.datetime.fromisoformat(timestamp.replace(" ", "T")).strftime('%Y-%m-%d %H:%M:%S')
+                                st.write(f"**Date:** {formatted_date}")
+                                found_timestamp = True
+                                break
+                        except ValueError:
+                            pass
+                # Check if it's a numeric timestamp (Unix timestamp)
+                elif isinstance(timestamp, (int, float)):
+                    formatted_date = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    st.write(f"**Date:** {formatted_date}")
+                    found_timestamp = True
+                    break
+            except Exception as e:
+                pass
+    
+    # Try looking in nested structures if still not found
+    if not found_timestamp:
+        nested_objects = [obj for obj in result_data.values() if isinstance(obj, dict)]
+        for nested in nested_objects:
+            for field in timestamp_fields:
+                if field in nested and nested[field]:
+                    try:
+                        timestamp = nested[field]
+                        if isinstance(timestamp, str):
+                            formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            st.write(f"**Date:** {formatted_date}")
+                            found_timestamp = True
+                            break
+                    except ValueError:
+                        pass
+            if found_timestamp:
+                break
+    
+    # If all attempts fail, show "Unknown"
+    if not found_timestamp:
+        st.write("**Date:** Unknown")
         
     st.write(f"**Analysis Type:** {'Multi-Angle' if result_data.get('multi_angle', False) else 'Single Image'}")
     
@@ -219,14 +280,37 @@ def show_result_details(username, result_id):
         
         with col1:
             st.write("**Original Image**")
-            if "original" in image_paths:
-                img_path = image_paths["original"]
-                if os.path.exists(img_path):
-                    try:
-                        img = Image.open(img_path)
-                        st.image(img, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error loading image: {e}")
+            # Try different possible keys for original image
+            original_keys = ["original", "original_image_path", "original_image"]
+            original_found = False
+            
+            for key in original_keys:
+                if key in image_paths:
+                    img_path = image_paths[key]
+                    if os.path.exists(img_path):
+                        try:
+                            img = Image.open(img_path)
+                            st.image(img, use_container_width=True)
+                            original_found = True
+                            break
+                        except Exception as e:
+                            st.error(f"Error loading image ({key}): {e}")
+            
+            # If we still don't have an image, try looking in result_data directly
+            if not original_found:
+                if "original_image_path" in result_data:
+                    img_path = result_data["original_image_path"]
+                    if os.path.exists(img_path):
+                        try:
+                            img = Image.open(img_path)
+                            st.image(img, use_container_width=True)
+                            original_found = True
+                        except Exception as e:
+                            st.error(f"Error loading image from result_data: {e}")
+            
+            # If still no image found, display a message
+            if not original_found:
+                st.info("Original image not available")
         
         with col2:
             st.write("**Processed Image**")
@@ -249,15 +333,36 @@ def show_result_details(username, result_id):
         
         # Show additional visualizations
         st.subheader("Additional Visualizations")
-        for img_type in ["comparison_visualization", "bounding_box_visualization"]:
-            if img_type in image_paths and img_type != "combined_visualization":
+        
+        # Create a list of all possible visualization types
+        viz_types = ["comparison_visualization", "bounding_box_visualization", "combined_visualization"]
+        viz_found = False
+        
+        for img_type in viz_types:
+            if img_type in image_paths:
                 img_path = image_paths[img_type]
                 if os.path.exists(img_path):
                     try:
                         img = Image.open(img_path)
                         st.image(img, use_container_width=True, caption=img_type.replace("_", " ").title())
+                        viz_found = True
                     except Exception as e:
-                        st.error(f"Error loading image: {e}")
+                        st.error(f"Error loading {img_type}: {e}")
+        
+        # If no visualizations are found, check if they're in the result_data directly
+        if not viz_found and "visualizations" in result_data:
+            for viz_key, viz_path in result_data["visualizations"].items():
+                if os.path.exists(viz_path):
+                    try:
+                        img = Image.open(viz_path)
+                        st.image(img, use_container_width=True, caption=viz_key.replace("_", " ").title())
+                        viz_found = True
+                    except Exception as e:
+                        st.error(f"Error loading visualization from result_data: {e}")
+        
+        # If still no visualizations found, display a message
+        if not viz_found:
+            st.info("No additional visualizations available")
     
     with ripeness_tab:
         # Display ripeness predictions
@@ -378,13 +483,12 @@ def show_result_details(username, result_id):
             st.write(f"**Segmentation:** {'Enabled' if result_data.get('segmentation', False) else 'Disabled'}")
             
             if result_data.get("segmentation", False):
-                st.write(f"**Segmentation Model:** UNet-ResNet50")
+                st.write(f"**Segmentation Model:** SPEAR-net")
                 st.write(f"**Refinement Method:** {result_data.get('refinement_method', 'all')}")
                 
                 if "mask_metrics" in result_data:
                     st.write("**Mask Quality Metrics:**")
                     metrics = result_data.get("mask_metrics", {})
-                    st.write(f"- Number of objects: {metrics.get('num_objects', 0)}")
                     st.write(f"- Mask coverage: {metrics.get('coverage_ratio', 0):.2%} of image")
                     st.write(f"- Boundary complexity: {metrics.get('boundary_complexity', 0):.2f}")
         
