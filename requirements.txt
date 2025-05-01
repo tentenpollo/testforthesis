@@ -1,8 +1,11 @@
 inference_sdk==0.47.0
-matplotlib==3.9.2  
-numpy>=2.0.0,<2.3.0  
-opencv-python-headless==4.11.0.86  # Using headless version instead of regular opencv-python
+matplotlib==3.9.2
+numpy>=2.0.0,<2.3.0
+opencv-python-headless==4.11.0.86
 Pillow==11.2.1
 streamlit==1.44.1
 torch==2.6.0
 torchvision==0.21.0
+plotly==6.0.1  # Added this based on the error
+pandas==2.2.3   # Added since you're importing pd
+huggingface-hub==0.30.2  # Added based on the import in app.py
