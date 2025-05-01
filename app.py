@@ -822,7 +822,7 @@ def main():
                             # Select the correct image source
                             image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
                             # Display the image with controlled width
-                            st.image(image_input, use_column_width=True)
+                            st.image(image_input, use_container_width=True)
                     
                     # Add start analysis button
                     col1, col2, col3 = st.columns([1, 2, 1])
