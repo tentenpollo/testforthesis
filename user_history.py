@@ -27,9 +27,15 @@ def show_history_page(username):
     with list_tab:
         # Display results as a list
         for index, result in enumerate(results):
+            # Handle missing or invalid timestamp
+            try:
+                timestamp = result.get('timestamp', '')
+                formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M') if timestamp else 'Unknown Date'
+            except ValueError:
+                formatted_date = 'Unknown Date'
+                
             with st.expander(
-                f"#{index + 1}: {result.get('fruit_type', 'Unknown')} - " + 
-                f"{datetime.datetime.fromisoformat(result.get('timestamp', '')).strftime('%Y-%m-%d %H:%M')}"
+                f"#{index + 1}: {result.get('fruit_type', 'Unknown')} - {formatted_date}"
             ):
                 col1, col2 = st.columns([1, 1])
                 
@@ -37,7 +43,16 @@ def show_history_page(username):
                     # Display basic information
                     st.write(f"**Fruit Type:** {result.get('fruit_type', 'Unknown')}")
                     st.write(f"**Analysis Type:** {result.get('analysis_type', 'Single Image')}")
-                    st.write(f"**Date:** {datetime.datetime.fromisoformat(result.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    # Handle timestamp safely
+                    try:
+                        if timestamp:
+                            formatted_full_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            st.write(f"**Date:** {formatted_full_date}")
+                        else:
+                            st.write("**Date:** Unknown")
+                    except ValueError:
+                        st.write("**Date:** Invalid format")
                     
                     # Display ripeness predictions
                     st.write("**Ripeness Predictions:**")
@@ -88,8 +103,14 @@ def show_history_page(username):
                         ripeness_data[fruit_type] = {}
                     ripeness_data[fruit_type][top_ripeness] = ripeness_data[fruit_type].get(top_ripeness, 0) + 1
                 
-                # Track timestamps for activity chart
-                timestamps.append(datetime.datetime.fromisoformat(result.get('timestamp', '')))
+                # Track timestamps for activity chart - handle errors safely
+                try:
+                    timestamp = result.get('timestamp', '')
+                    if timestamp:
+                        timestamps.append(datetime.datetime.fromisoformat(timestamp))
+                except ValueError:
+                    # Skip invalid timestamps
+                    pass
             
             # Create stats charts
             st.subheader("Analysis Statistics")
@@ -115,21 +136,24 @@ def show_history_page(username):
                     st.plotly_chart(fig)
             
             # Activity over time
-            st.write("### Analysis Activity")
-            # Group by day
-            timestamps.sort()
-            dates = [ts.date() for ts in timestamps]
-            date_counts = {}
-            for date in dates:
-                date_counts[date] = date_counts.get(date, 0) + 1
-            
-            fig = px.line(
-                x=list(date_counts.keys()),
-                y=list(date_counts.values()),
-                title="Analyses Over Time",
-                labels={"x": "Date", "y": "Number of Analyses"}
-            )
-            st.plotly_chart(fig)
+            if timestamps:
+                st.write("### Analysis Activity")
+                # Group by day
+                timestamps.sort()
+                dates = [ts.date() for ts in timestamps]
+                date_counts = {}
+                for date in dates:
+                    date_counts[date] = date_counts.get(date, 0) + 1
+                
+                fig = px.line(
+                    x=list(date_counts.keys()),
+                    y=list(date_counts.values()),
+                    title="Analyses Over Time",
+                    labels={"x": "Date", "y": "Number of Analyses"}
+                )
+                st.plotly_chart(fig)
+            else:
+                st.info("No valid timestamps for activity chart.")
         else:
             st.info("Not enough data for statistics.")
 
@@ -159,7 +183,18 @@ def show_result_details(username, result_id):
     
     # Display metadata
     st.subheader(f"{result_data.get('fruit_type', 'Unknown')} Analysis")
-    st.write(f"**Date:** {datetime.datetime.fromisoformat(result_data.get('timestamp', '')).strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Handle timestamp safely
+    try:
+        timestamp = result_data.get('timestamp', '')
+        if timestamp:
+            formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            st.write(f"**Date:** {formatted_date}")
+        else:
+            st.write("**Date:** Unknown")
+    except ValueError:
+        st.write("**Date:** Invalid format")
+        
     st.write(f"**Analysis Type:** {'Multi-Angle' if result_data.get('multi_angle', False) else 'Single Image'}")
     
     # Display images
