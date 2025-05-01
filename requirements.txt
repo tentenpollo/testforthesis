@@ -1,8 +1,8 @@
 inference_sdk==0.47.0
-matplotlib==3.9.0
-numpy==1.26.4
-opencv-python==4.10.0.84  # Must be <=4.10.0.84 for inference_sdk
-Pillow==11.2.1
-streamlit==1.44.1
-torch==2.6.0  # Or use 2.6.0 if you accept slower deployment
-torchvision==0.15.2  # Match torch version
+matplotlib==3.9.2  # From your pip freeze
+numpy>=2.0.0,<2.3.0  # Compatible with inference-sdk 0.47.0
+opencv-python==4.10.0.84  # From your pip freeze
+Pillow==11.2.1  # From requirements you tried
+streamlit==1.44.1  # From your pip freeze
+torch==2.6.0  # From your pip freeze
+torchvision==0.21.0  # From your pip freeze (you had +cu126 suffix which is for CUDA support)
