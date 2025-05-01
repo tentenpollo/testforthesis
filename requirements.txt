@@ -1,8 +1,8 @@
 inference_sdk==0.47.0
-matplotlib==3.10.1
-numpy==2.2.5
-opencv_python==4.11.0.86
+matplotlib==3.9.0
+numpy==1.26.4
+opencv-python==4.10.0.84  # Must be <=4.10.0.84 for inference_sdk
 Pillow==11.2.1
 streamlit==1.44.1
-torch==2.6.0
-torchvision==0.21.0
+torch==2.6.0  # Or use 2.6.0 if you accept slower deployment
+torchvision==0.15.2  # Match torch version
