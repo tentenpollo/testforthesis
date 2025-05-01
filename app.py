@@ -80,13 +80,8 @@ def combine_multi_angle_results(results_list):
     if not valid_results:
         return {"error": "No valid results to combine"}
     
-    
     combined = valid_results[0].copy()
-    
-    
-    
-    
-    
+
     ripeness_predictions = {}
     for r in valid_results:
         if "ripeness_predictions" in r and r["ripeness_predictions"]:
@@ -251,7 +246,6 @@ def display_results(results, system, use_segmentation, username):
         elif "error" in results:
             st.warning(f"Ripeness detection error: {results['error']}")
         
-        
         with st.expander("Technical Details"):
             if use_segmentation:
                 st.write("**Segmentation Mask:**")
@@ -260,7 +254,6 @@ def display_results(results, system, use_segmentation, username):
                 if "mask_metrics" in results:
                     st.write("**Mask Quality Metrics:**")
                     metrics = results["mask_metrics"]
-                    st.write(f"- Number of objects: {metrics['num_objects']}")
                     st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
                     st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
             else:
@@ -535,41 +528,33 @@ def main():
         "Strawberry": "🍓",
         "Mango": "🥭"
     }
-    # In your main() function, modify the navigation section in the sidebar:
 
     with st.sidebar:
         st.title("🍎 Fruit Ripeness")
         
-        # Check authentication status
         current_user = get_current_user()
         
         if current_user:
             st.write(f"👋 Welcome, {current_user}!")
             
-            # Create navigation
             st.subheader("Navigation")
             nav_options = ["Home", "Analysis History", "About"]
             
-            # Map navigation options to session_state.page values
             nav_map = {
                 "Home": "home",
                 "Analysis History": "history",
                 "About": "about"
             }
             
-            # Create navigation buttons
             for nav_option in nav_options:
                 if st.button(nav_option, use_container_width=True, 
                             type="primary" if st.session_state.page == nav_map[nav_option] else "secondary"):
                     st.session_state.page = nav_map[nav_option]
-                    # Reset any page-specific state when changing pages
                     if nav_map[nav_option] != "history":
                         st.session_state.view_details = False
                         st.session_state.selected_result_id = None
                     
-                    # Reset analysis state when navigating to home
                     if nav_map[nav_option] == "home":
-                        # Full reset of analysis state
                         st.session_state.analysis_step = "select_fruit"
                         st.session_state.selected_fruit = None
                         st.session_state.uploaded_file = None
@@ -590,39 +575,31 @@ def main():
                     
                     st.rerun()
             
-            # Logout button
             if st.button("Logout", use_container_width=True):
                 for key in ["logged_in", "username", "page"]:
                     if key in st.session_state:
                         del st.session_state[key]
                 st.rerun()
         
-        # Add information about the system
-        st.divider()
+        st.divider()    
         st.caption("Fruit Ripeness Detection System v1.1")
-        st.caption("© 2025 FruitTech Industries")
+        st.caption("© 2025 FruitThesis Industries")
     
-    # Check if user is logged in, if not show login page
     if not st.session_state.logged_in:
         if show_login_page():
-            # If login is successful, set page to home
             st.session_state.page = "home"
             st.rerun()
         return
     
-    # Load the system models
     system = load_models()
     
-    # Get the current user
     username = get_current_user()
     
-    # Show the appropriate page based on session state
     if st.session_state.page == "history":
         if st.session_state.view_details and st.session_state.selected_result_id:
             # Show detailed view of a single result
             show_result_details(username, st.session_state.selected_result_id)
         else:
-            # Show history page
             show_history_page(username)
             
     elif st.session_state.page == "about":
@@ -666,7 +643,6 @@ def main():
         Follow the guided process to analyze your fruit!
         """)
         
-        # Initialize session state variables if not already present
         if "show_top" not in st.session_state:
             st.session_state.show_top = False
         if "show_bottom" not in st.session_state:
@@ -683,7 +659,6 @@ def main():
             # Create a visually appealing fruit selection layout
             col1, col2, col3, col4, col5 = st.columns(5)
             
-            # Create fruit selection cards
             with col1:
                 tomato_card = st.container()
                 with tomato_card:
@@ -729,11 +704,9 @@ def main():
                         st.session_state.analysis_step = "upload_image"
                         st.rerun()
         
-        # Step 2: Upload image
         elif st.session_state.analysis_step == "upload_image":
             st.header(f"Step 2: Upload {st.session_state.selected_fruit} Image")
             
-            # Add back button
             if st.button("← Back to Fruit Selection", key="back_to_fruit"):
                 st.session_state.selected_fruit = None
                 st.session_state.analysis_step = "select_fruit"
@@ -743,7 +716,6 @@ def main():
             
             st.write(f"You selected: {fruit_icons.get(st.session_state.selected_fruit, '🍎')} **{st.session_state.selected_fruit}**")
             
-            # Analysis type selection
             analysis_type = st.radio(
                 "Select Analysis Type",
                 ["Single Image", "Patch-Based (Multiple Angles)"],
@@ -751,7 +723,6 @@ def main():
                 help="Single Image: Analyze one image. Patch-Based: Analyze multiple angles of the same fruit."
             )
             
-            # Advanced options
             with st.expander("Advanced Options"):
                 use_segmentation = st.checkbox("Use Segmentation", value=True, 
                                             help="Segment the fruit from the background before analysis. Disable this to send the original image directly to the ripeness detector.")
@@ -775,10 +746,8 @@ def main():
                 st.session_state.refinement_method = refinement_method
             
             if analysis_type == "Single Image":
-                # Create a centered upload area with a box design
                 st.write("### Upload Your Image")
                 
-                # Create a container with custom styling for the upload area
                 upload_container = st.container()
                 with upload_container:
                     col1, col2, col3 = st.columns([1, 2, 1])
@@ -792,10 +761,8 @@ def main():
                             help="Drag and drop your image here or click to browse"
                         )
                         
-                        # Add a checkbox for camera option below the uploader
                         use_camera = st.checkbox("Use Camera Instead", key="use_camera_checkbox")
                         
-                        # Camera input if checkbox is selected
                         if use_camera:
                             camera_image = st.camera_input("Take a picture", key="camera_input")
                             if camera_image is not None:
@@ -806,25 +773,19 @@ def main():
                             if uploaded_file is not None:
                                 st.session_state.uploaded_file = uploaded_file
                 
-                # Show image preview and analysis button if an image is uploaded or captured
                 if (st.session_state.uploaded_file is not None or 
                     st.session_state.camera_image is not None):
                     
-                    # Create a container for the image preview with limited width
                     preview_container = st.container()
                     with preview_container:
                         st.subheader("Image Preview")
                         
-                        # Use columns to center and limit the width of the preview
                         prev_col1, prev_col2, prev_col3 = st.columns([1, 2, 1])
                         
                         with prev_col2:
-                            # Select the correct image source
                             image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
-                            # Display the image with controlled width
                             st.image(image_input, use_container_width=True)
                     
-                    # Add start analysis button
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
                         if st.button("🔍 Start Analysis", type="primary", use_container_width=True):
@@ -915,13 +876,10 @@ def main():
                 else:
                     st.warning("Please upload both front and back images for patch-based analysis")
         
-        # Step 3: Analyze
         elif st.session_state.analysis_step == "analyze":
             st.header(f"Analyzing {st.session_state.selected_fruit}")
-            
-            # Add button to start a new analysis
+        
             if st.button("← Start New Analysis", key="new_analysis"):
-                # Reset analysis-related session state
                 st.session_state.selected_fruit = None
                 st.session_state.analysis_step = "select_fruit"
                 st.session_state.uploaded_file = None
@@ -931,25 +889,19 @@ def main():
                 st.session_state.show_bottom = False
                 st.rerun()
             
-            # Get the current username
             username = get_current_user()
             
-            # Single image analysis - FIX: Check session state directly instead of st.file_uploader_state
             if st.session_state.uploaded_file is not None or st.session_state.camera_image is not None:
-                # Get image input (from file uploader or camera)
                 image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
                 
                 if image_input is not None:
-                    # Get analysis parameters from session state
                     use_segmentation = st.session_state.use_segmentation
                     refine_segmentation = st.session_state.refine_segmentation
                     refinement_method = st.session_state.refinement_method
                     
-                    # Progress indicators
                     progress_bar = st.progress(0)
                     status_text = st.empty()
-                    
-                    # Process the image
+
                     if use_segmentation:
                         status_text.text(f"Processing {st.session_state.selected_fruit} image with segmentation...")
                         progress_bar.progress(25)
@@ -960,6 +912,7 @@ def main():
                             refine_segmentation=refine_segmentation,
                             refinement_method=refinement_method
                         )
+                        
                     else:
                         status_text.text(f"Processing {st.session_state.selected_fruit} image without segmentation...")
                         progress_bar.progress(25)
@@ -972,28 +925,23 @@ def main():
                     progress_bar.progress(100)
                     status_text.text("Processing complete!")
                     
-                    # Display the results
                     display_results(results, system, use_segmentation, username)
-            
-            # Multi-angle analysis
+                    
             elif st.session_state.start_analysis and "front_file" in st.session_state and "back_file" in st.session_state:
                 front_file = st.session_state.front_file
                 back_file = st.session_state.back_file
                 top_file = st.session_state.top_file if "top_file" in st.session_state else None
                 bottom_file = st.session_state.bottom_file if "bottom_file" in st.session_state else None
                 
-                # Get analysis parameters from session state
                 use_segmentation = st.session_state.use_segmentation
                 refine_segmentation = st.session_state.refine_segmentation
                 refinement_method = st.session_state.refinement_method
                 
-                # Progress indicators
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
                 status_text.text(f"Processing {st.session_state.selected_fruit} from multiple angles...")
                 
-                # Process each angle
                 results_front = process_angle_image(
                     system, front_file, st.session_state.selected_fruit.lower(), "Front", 
                     use_segmentation, refine_segmentation, refinement_method
@@ -1023,14 +971,12 @@ def main():
                     )
                     progress_bar.progress(90)
                 
-                # Combine the results
                 angle_results = [r for r in [results_front, results_back, results_top, results_bottom] if r is not None]
                 combined_results = combine_multi_angle_results(angle_results)
                 
                 progress_bar.progress(100)
                 status_text.text("Processing complete!")
-                
-                # Display the results
+
                 display_patch_based_results(combined_results, system, use_segmentation, username)
             else:
                 st.error("No image data found. Please go back and upload images.")

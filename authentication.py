@@ -6,22 +6,18 @@ def show_login_page():
     st.title("🍎 Fruit Ripeness Detection System")
     st.subheader("Login")
     
-    # Check if the user is already logged in
     if "logged_in" in st.session_state and st.session_state.logged_in:
         st.success(f"You are logged in as {st.session_state.username}")
         if st.button("Logout"):
-            # Clear the session state
             for key in ["logged_in", "username"]:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
         return True
-    
-    # Create tabs for login and registration
+
     login_tab, register_tab = st.tabs(["Login", "Register"])
     
     with login_tab:
-        # Create a form for login
         with st.form("login_form"):
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
@@ -31,18 +27,15 @@ def show_login_page():
                 if not username or not password:
                     st.error("Please enter both username and password")
                 elif authenticate_user(username, password):
-                    # Set session state
                     st.session_state.logged_in = True
                     st.session_state.username = username
                     st.success(f"Welcome back, {username}!")
-                    # Rerun the app to refresh the page
                     st.rerun()
                     return True
                 else:
                     st.error("Invalid username or password")
     
     with register_tab:
-        # Create a form for registration
         with st.form("register_form"):
             new_username = st.text_input("New Username")
             new_password = st.text_input("New Password", type="password")
@@ -61,8 +54,7 @@ def show_login_page():
                         st.success(f"Registration successful for {new_username}! Please log in.")
                     else:
                         st.error("Registration failed")
-    
-    # Guest mode option
+                        
     st.divider()
     st.write("Don't want to create an account?")
     if st.button("Continue as Guest"):

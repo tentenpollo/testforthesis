@@ -45,11 +45,9 @@ def show_history_page(username):
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    # Display basic information
                     st.write(f"**Fruit Type:** {result.get('fruit_type', 'Unknown')}")
                     st.write(f"**Analysis Type:** {result.get('analysis_type', 'Single Image')}")
                     
-                    # Handle timestamp safely
                     try:
                         if timestamp:
                             formatted_full_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
@@ -59,13 +57,11 @@ def show_history_page(username):
                     except ValueError:
                         st.write("**Date:** Invalid format")
                     
-                    # Display ripeness predictions
                     st.write("**Ripeness Predictions:**")
                     for pred in result.get("ripeness_predictions", []):
                         st.write(f"- {pred.get('ripeness')}: {pred.get('confidence', 0):.2f}")
                 
                 with col2:
-                    # Display the combined visualization if available
                     if "image_paths" in result and "combined_visualization" in result["image_paths"]:
                         img_path = result["image_paths"]["combined_visualization"]
                         if os.path.exists(img_path):
@@ -83,25 +79,20 @@ def show_history_page(username):
                             except Exception as e:
                                 st.error(f"Error loading image: {e}")
                 
-                # Add buttons row at the bottom of the expander
                 button_col1, button_col2 = st.columns(2)
                 
                 with button_col1:
-                    # View details button
                     if st.button(f"View Full Details", key=f"view_{result.get('id')}", use_container_width=True):
                         st.session_state.selected_result_id = result.get('id')
                         st.session_state.view_details = True
                         st.rerun()
                 
                 with button_col2:
-                    # Delete button
                     if st.button(f"🗑️ Delete", key=f"delete_{result.get('id')}", 
                               type="secondary", use_container_width=True):
-                        # Set the current result for deletion confirmation
                         st.session_state.delete_confirmation = result.get('id')
                         st.rerun()
             
-            # Check if this result is pending deletion confirmation
             if st.session_state.delete_confirmation == result.get('id'):
                 with st.container():
                     st.warning(f"⚠️ Are you sure you want to delete this {result.get('fruit_type', 'Unknown')} analysis from {formatted_date}?")
@@ -152,7 +143,6 @@ def show_history_page(username):
                     if timestamp:
                         timestamps.append(datetime.datetime.fromisoformat(timestamp))
                 except ValueError:
-                    # Skip invalid timestamps
                     pass
             
             # Create stats charts
@@ -214,7 +204,7 @@ def show_result_details(username, result_id):
             st.rerun()
         return
     
-    # Debug expander remains the same
+    """
     with st.expander("Debug: Raw Result Data", expanded=False):
         st.write("Result ID:", result_id)
         st.write("Top-level keys:", list(result_data.keys()))
@@ -228,8 +218,8 @@ def show_result_details(username, result_id):
             st.write("Visualization keys:", list(result_data["visualizations"].keys()))
     
     st.title("📋 Detailed Analysis Result")
+    """
     
-    # Back button remains the same
     if st.button("← Back to History"):
         if "selected_result_id" in st.session_state:
             del st.session_state.selected_result_id
@@ -237,18 +227,14 @@ def show_result_details(username, result_id):
             del st.session_state.view_details
         st.rerun()
     
-    # Display metadata
     st.subheader(f"{result_data.get('fruit_type', 'Unknown')} Analysis")
     
-    # EXTRACT TIMESTAMP FROM RESULT_ID
-    # Format is typically: Username_YYYYMMDD_HHMMSS
     try:
-        # Extract date and time from result_id
         if result_id and '_' in result_id:
             parts = result_id.split('_')
             if len(parts) >= 3:
-                date_part = parts[-2]  # YYYYMMDD
-                time_part = parts[-1]  # HHMMSS
+                date_part = parts[-2]
+                time_part = parts[-1]
                 
                 if len(date_part) == 8 and len(time_part) == 6:
                     year = date_part[0:4]
@@ -262,7 +248,6 @@ def show_result_details(username, result_id):
                     formatted_date = f"{year}-{month}-{day} {hour}:{minute}:{second}"
                     st.write(f"**Date:** {formatted_date}")
                 else:
-                    # If format doesn't match expected pattern, fall back to existing timestamp
                     if "timestamp" in result_data and result_data["timestamp"]:
                         st.write(f"**Date:** {result_data['timestamp']}")
                     else:
@@ -270,7 +255,7 @@ def show_result_details(username, result_id):
             else:
                 st.write("**Date:** Cannot extract from result ID")
         else:
-            # Fall back to timestamp in result_data if result_id extraction fails
+
             if "timestamp" in result_data and result_data["timestamp"]:
                 st.write(f"**Date:** {result_data['timestamp']}")
             else:

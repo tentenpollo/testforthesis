@@ -24,9 +24,20 @@ def standardize_ripeness_label(fruit_type, class_name):
     elif fruit_type_normalized in ["strawberry", "strawberries"]:
         if class_name_lower in ["strawberryripe", "ripe"]:
             return "Ripe"
-        elif class_name_lower in ["strawberryunripe", "unripe"]:
+        elif class_name_lower in ["strawberryunripe", "unripe"]:    
             return "Unripe"
         elif class_name_lower in ["strawberryrotten", "rotten"]:
+            return "Overripe"
+        else:
+            return class_name.capitalize()
+    elif fruit_type_normalized in ["mango", "mangoes", "mangos"]:
+        if class_name_lower in ["early_ripe-21-40-", "unripe-1-20-"]:
+            return "Unripe"
+        elif class_name_lower == "partially_ripe-41-60-":
+            return "Underripe"
+        elif class_name_lower == "ripe-61-80-":
+            return "Ripe"
+        elif class_name_lower == "over_ripe-81-100-":
             return "Overripe"
         else:
             return class_name.capitalize()

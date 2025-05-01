@@ -106,7 +106,7 @@ class FruitRipenessSystem:
             "pineapple": "pineapple-maturity-project-app/1",
             "banana": "banana-project/2",
             "strawberry": "strawberry-ml-detection-02/1",
-            "mango": "-3vli4/1",
+            "mango": "mango-detection-goiq9/1",
         }
         self.supported_fruits = list(self.fruit_to_model.keys())
         os.makedirs('results', exist_ok=True)
@@ -303,9 +303,6 @@ class FruitRipenessSystem:
             # Normalize the fruit type - strip whitespace and convert to lowercase
             fruit_type_normalized = fruit_type.lower().strip()
             
-            # Step 3: Detect ripeness using the segmented image
-            # Using the segmented image ensures the model focuses only on the fruit
-            # and eliminates potential noise from the background
             ripeness_result = self.detect_ripeness_with_mask(
                 original_path, segmented_img, mask, fruit_type_normalized
             )
@@ -435,14 +432,28 @@ class FruitRipenessSystem:
                 else:
                     # Just capitalize the existing class name if not in our mapping
                     ripeness_label = class_name.capitalize()
+            elif fruit_type_normalized == "mango":
+                # Custom mapping for mango ripeness classes
+                class_name_lower = class_name.lower()
+                if class_name_lower in ["early_ripe-21-40-", "unripe-1-20-"]:
+                    ripeness_label = "Unripe"
+                elif class_name_lower == "partially_ripe-41-60-":
+                    ripeness_label = "Underripe"
+                elif class_name_lower == "ripe-61-80-":
+                    ripeness_label = "Ripe"
+                elif class_name_lower == "over_ripe-81-100-":
+                    ripeness_label = "Overripe"
+                else:
+                    # Just capitalize the existing class name if not in our mapping
+                    ripeness_label = class_name.capitalize()
             else:
                 ripeness_label = class_name
-                
+                    
             formatted.append({
                 "ripeness": ripeness_label,
                 "confidence": confidence
             })
-            
+                
         return sorted(formatted, key=lambda x: x["confidence"], reverse=True)
     
     def visualize_results(self, results, save_dir="results"):
