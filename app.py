@@ -519,9 +519,7 @@ def display_patch_based_results(combined_results, system, use_segmentation, user
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
-# Fix the error in the analyze step and improve the image upload UI
 def main():
-    
     fruit_icons = {
         "Tomato": "🍅",
         "Pineapple": "🍍",
