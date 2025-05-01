@@ -1,0 +1,17 @@
+{
+    "id": "Tenten_20250501_165239",
+    "username": "Tenten",
+    "timestamp": "2025-05-01T16:52:39.664408",
+    "fruit_type": "tomato",
+    "analysis_type": "single_image",
+    "ripeness_predictions": [
+        {
+            "ripeness": "Tomato Rotten",
+            "confidence": 0.938838005065918
+        },
+        {
+            "ripeness": "Tomato Rotten",
+            "confidence": 0.9187834858894348
+        }
+    ]
+}
