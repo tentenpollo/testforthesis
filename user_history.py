@@ -6,7 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
-from user_management import get_user_results, get_result_details
+from user_management import get_user_results, get_result_details, delete_user_result
+import time
 
 def show_history_page(username):
     """Display the user's saved analysis history"""
@@ -20,6 +21,10 @@ def show_history_page(username):
         st.info("You don't have any saved analysis results yet.")
         st.write("Complete a fruit analysis to see it here!")
         return
+    
+    # Add session state variable for deletion confirmation
+    if "delete_confirmation" not in st.session_state:
+        st.session_state.delete_confirmation = None
     
     # Create tabs for different views
     list_tab, stats_tab = st.tabs(["Analysis List", "Statistics"])
@@ -78,11 +83,49 @@ def show_history_page(username):
                             except Exception as e:
                                 st.error(f"Error loading image: {e}")
                 
-                # Add button to view full details
-                if st.button(f"View Full Details", key=f"view_{result.get('id')}"):
-                    st.session_state.selected_result_id = result.get('id')
-                    st.session_state.view_details = True
-                    st.rerun()
+                # Add buttons row at the bottom of the expander
+                button_col1, button_col2 = st.columns(2)
+                
+                with button_col1:
+                    # View details button
+                    if st.button(f"View Full Details", key=f"view_{result.get('id')}", use_container_width=True):
+                        st.session_state.selected_result_id = result.get('id')
+                        st.session_state.view_details = True
+                        st.rerun()
+                
+                with button_col2:
+                    # Delete button
+                    if st.button(f"🗑️ Delete", key=f"delete_{result.get('id')}", 
+                              type="secondary", use_container_width=True):
+                        # Set the current result for deletion confirmation
+                        st.session_state.delete_confirmation = result.get('id')
+                        st.rerun()
+            
+            # Check if this result is pending deletion confirmation
+            if st.session_state.delete_confirmation == result.get('id'):
+                with st.container():
+                    st.warning(f"⚠️ Are you sure you want to delete this {result.get('fruit_type', 'Unknown')} analysis from {formatted_date}?")
+                    
+                    confirm_col1, confirm_col2 = st.columns(2)
+                    
+                    with confirm_col1:
+                        if st.button("✅ Yes, Delete", key=f"confirm_{result.get('id')}", type="primary"):
+                            # Call the delete function
+                            if delete_user_result(username, result.get('id')):
+                                st.success("Analysis result deleted successfully!")
+                                # Reset confirmation state
+                                st.session_state.delete_confirmation = None
+                                # Refresh to update the list
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete the analysis result.")
+                    
+                    with confirm_col2:
+                        if st.button("❌ Cancel", key=f"cancel_{result.get('id')}", type="secondary"):
+                            # Reset confirmation state
+                            st.session_state.delete_confirmation = None
+                            st.rerun()
     
     with stats_tab:
         if len(results) > 0:
@@ -171,7 +214,7 @@ def show_result_details(username, result_id):
             st.rerun()
         return
     
-    # Add a debug expander to see raw result data (this can help debug issues)
+    # Debug expander remains the same
     with st.expander("Debug: Raw Result Data", expanded=False):
         st.write("Result ID:", result_id)
         st.write("Top-level keys:", list(result_data.keys()))
@@ -186,7 +229,7 @@ def show_result_details(username, result_id):
     
     st.title("📋 Detailed Analysis Result")
     
-    # Add a back button
+    # Back button remains the same
     if st.button("← Back to History"):
         if "selected_result_id" in st.session_state:
             del st.session_state.selected_result_id
@@ -197,65 +240,48 @@ def show_result_details(username, result_id):
     # Display metadata
     st.subheader(f"{result_data.get('fruit_type', 'Unknown')} Analysis")
     
-    # Handle timestamp with various formats
-    found_timestamp = False
-    
-    # Try direct timestamp fields with different formats
-    timestamp_fields = ["timestamp", "date", "created_at"]
-    for field in timestamp_fields:
-        if field in result_data and result_data[field]:
-            try:
-                timestamp = result_data[field]
-                # Check if it's a string that needs formatting
-                if isinstance(timestamp, str):
-                    # Try to format with T separator first
-                    try:
-                        formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                        st.write(f"**Date:** {formatted_date}")
-                        found_timestamp = True
-                        break
-                    except ValueError:
-                        # If that fails, try with space instead of T
-                        try:
-                            # Replace space with T if needed
-                            if " " in timestamp and "T" not in timestamp:
-                                formatted_date = datetime.datetime.fromisoformat(timestamp.replace(" ", "T")).strftime('%Y-%m-%d %H:%M:%S')
-                                st.write(f"**Date:** {formatted_date}")
-                                found_timestamp = True
-                                break
-                        except ValueError:
-                            pass
-                # Check if it's a numeric timestamp (Unix timestamp)
-                elif isinstance(timestamp, (int, float)):
-                    formatted_date = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    # EXTRACT TIMESTAMP FROM RESULT_ID
+    # Format is typically: Username_YYYYMMDD_HHMMSS
+    try:
+        # Extract date and time from result_id
+        if result_id and '_' in result_id:
+            parts = result_id.split('_')
+            if len(parts) >= 3:
+                date_part = parts[-2]  # YYYYMMDD
+                time_part = parts[-1]  # HHMMSS
+                
+                if len(date_part) == 8 and len(time_part) == 6:
+                    year = date_part[0:4]
+                    month = date_part[4:6]
+                    day = date_part[6:8]
+                    
+                    hour = time_part[0:2]
+                    minute = time_part[2:4]
+                    second = time_part[4:6]
+                    
+                    formatted_date = f"{year}-{month}-{day} {hour}:{minute}:{second}"
                     st.write(f"**Date:** {formatted_date}")
-                    found_timestamp = True
-                    break
-            except Exception as e:
-                pass
+                else:
+                    # If format doesn't match expected pattern, fall back to existing timestamp
+                    if "timestamp" in result_data and result_data["timestamp"]:
+                        st.write(f"**Date:** {result_data['timestamp']}")
+                    else:
+                        st.write("**Date:** Unknown")
+            else:
+                st.write("**Date:** Cannot extract from result ID")
+        else:
+            # Fall back to timestamp in result_data if result_id extraction fails
+            if "timestamp" in result_data and result_data["timestamp"]:
+                st.write(f"**Date:** {result_data['timestamp']}")
+            else:
+                st.write("**Date:** Unknown")
+    except Exception as e:
+        # If any error occurs, try using timestamp from result_data
+        if "timestamp" in result_data and result_data["timestamp"]:
+            st.write(f"**Date:** {result_data['timestamp']}")
+        else:
+            st.write(f"**Date:** Unable to format date")
     
-    # Try looking in nested structures if still not found
-    if not found_timestamp:
-        nested_objects = [obj for obj in result_data.values() if isinstance(obj, dict)]
-        for nested in nested_objects:
-            for field in timestamp_fields:
-                if field in nested and nested[field]:
-                    try:
-                        timestamp = nested[field]
-                        if isinstance(timestamp, str):
-                            formatted_date = datetime.datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                            st.write(f"**Date:** {formatted_date}")
-                            found_timestamp = True
-                            break
-                    except ValueError:
-                        pass
-            if found_timestamp:
-                break
-    
-    # If all attempts fail, show "Unknown"
-    if not found_timestamp:
-        st.write("**Date:** Unknown")
-        
     st.write(f"**Analysis Type:** {'Multi-Angle' if result_data.get('multi_angle', False) else 'Single Image'}")
     
     # Display images
@@ -281,20 +307,36 @@ def show_result_details(username, result_id):
         with col1:
             st.write("**Original Image**")
             # Try different possible keys for original image
-            original_keys = ["original", "original_image_path", "original_image"]
+            original_keys = ["original", "original_image_path"]
             original_found = False
             
-            for key in original_keys:
-                if key in image_paths:
-                    img_path = image_paths[key]
+            # Look first in image_paths
+            if "image_paths" in result_data:
+                for key in original_keys:
+                    if key in result_data["image_paths"]:
+                        img_path = result_data["image_paths"][key]
+                        if os.path.exists(img_path):
+                            try:
+                                img = Image.open(img_path)
+                                st.image(img, use_container_width=True)
+                                original_found = True
+                                break
+                            except Exception as e:
+                                st.error(f"Error loading image ({key}): {e}")
+            
+            # Then look for keys with angle prefixes (for multi-angle)
+            if not original_found and "image_paths" in result_data:
+                angle_original_keys = [k for k in result_data["image_paths"].keys() 
+                                    if k.startswith("original_")]
+                if angle_original_keys:
+                    img_path = result_data["image_paths"][angle_original_keys[0]]
                     if os.path.exists(img_path):
                         try:
                             img = Image.open(img_path)
                             st.image(img, use_container_width=True)
                             original_found = True
-                            break
                         except Exception as e:
-                            st.error(f"Error loading image ({key}): {e}")
+                            st.error(f"Error loading angle image: {e}")
             
             # If we still don't have an image, try looking in result_data directly
             if not original_found:
@@ -307,6 +349,20 @@ def show_result_details(username, result_id):
                             original_found = True
                         except Exception as e:
                             st.error(f"Error loading image from result_data: {e}")
+                
+                # Try angle results as last resort
+                elif "angle_results" in result_data and result_data["angle_results"]:
+                    for angle_result in result_data["angle_results"]:
+                        if "original_image_path" in angle_result:
+                            img_path = angle_result["original_image_path"]
+                            if os.path.exists(img_path):
+                                try:
+                                    img = Image.open(img_path)
+                                    st.image(img, use_container_width=True)
+                                    original_found = True
+                                    break
+                                except Exception as e:
+                                    continue
             
             # If still no image found, display a message
             if not original_found:

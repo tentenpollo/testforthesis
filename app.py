@@ -196,12 +196,9 @@ def display_results(results, system, use_segmentation, username):
             for pred in results["ripeness_predictions"]:
                 ripeness_data["Ripeness Level"].append(pred["ripeness"])
                 ripeness_data["Confidence"].append(f"{pred['confidence']:.2f}")
-            
-            
+                
             st.table(ripeness_data)
 
-            
-            
             if "visualizations" in results:
                 st.subheader("Enhanced Visualizations")
                 
@@ -285,7 +282,6 @@ def display_results(results, system, use_segmentation, username):
                 
             st.subheader("Save Results")
     
-    # Only show save option for logged-in users (not guests)
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
@@ -305,15 +301,27 @@ def display_results(results, system, use_segmentation, username):
                 # Add segmentation info
                 save_results["segmentation"] = use_segmentation
                 
-                # Save image paths for storage
+                # IMPROVED IMAGE PATH SAVING
                 image_paths = {}
                 
-                # Original image
-                if "original_image_path" in results:
-                    image_paths["original"] = results["original_image_path"]
+                # Make sure to save the original image
+                if isinstance(results["original_image"], Image.Image):
+                    # Save original image if it's a PIL Image
+                    original_path = f"results/original_{int(time.time())}.png"
+                    results["original_image"].save(original_path)
+                    image_paths["original"] = original_path
+                    save_results["original_image_path"] = original_path
+                elif "original_image_path" in results:
+                    # Use existing path if available
+                    image_paths["original"] = results["original_image_path"] 
                 
                 # Segmented image
-                if "segmented_image_path" in results:
+                if "segmented_image" in results and isinstance(results["segmented_image"], Image.Image):
+                    segmented_path = f"results/segmented_{int(time.time())}.png"
+                    results["segmented_image"].save(segmented_path)
+                    image_paths["segmented"] = segmented_path
+                    save_results["segmented_image_path"] = segmented_path
+                elif "segmented_image_path" in results:
                     image_paths["segmented"] = results["segmented_image_path"]
                 
                 # Visualizations
@@ -527,6 +535,8 @@ def main():
         "Strawberry": "🍓",
         "Mango": "🥭"
     }
+    # In your main() function, modify the navigation section in the sidebar:
+
     with st.sidebar:
         st.title("🍎 Fruit Ripeness")
         
@@ -556,8 +566,28 @@ def main():
                     if nav_map[nav_option] != "history":
                         st.session_state.view_details = False
                         st.session_state.selected_result_id = None
-                    if nav_map[nav_option] != "home":
+                    
+                    # Reset analysis state when navigating to home
+                    if nav_map[nav_option] == "home":
+                        # Full reset of analysis state
+                        st.session_state.analysis_step = "select_fruit"
+                        st.session_state.selected_fruit = None
+                        st.session_state.uploaded_file = None
+                        st.session_state.camera_image = None
                         st.session_state.start_analysis = False
+                        st.session_state.show_top = False
+                        st.session_state.show_bottom = False
+                        
+                        # Also clear these if they exist
+                        if "front_file" in st.session_state:
+                            del st.session_state.front_file
+                        if "back_file" in st.session_state:
+                            del st.session_state.back_file
+                        if "top_file" in st.session_state:
+                            del st.session_state.top_file
+                        if "bottom_file" in st.session_state:
+                            del st.session_state.bottom_file
+                    
                     st.rerun()
             
             # Logout button

@@ -5,6 +5,7 @@ import secrets
 import datetime
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
+import shutil
 
 USER_DB_PATH = "data/users.json"
 USER_RESULTS_PATH = "data/user_results"
@@ -308,3 +309,22 @@ def get_result_details(username: str, result_id: str) -> Optional[Dict]:
     result_data["image_paths"] = image_paths
     
     return result_data
+
+def delete_user_result(username: str, result_id: str) -> bool:
+    """
+    Delete a specific analysis result for a user
+    """
+    
+    # Get the result directory path
+    result_dir = os.path.join(USER_RESULTS_PATH, username, result_id)
+    
+    # Check if the directory exists
+    if not os.path.exists(result_dir):
+        return False
+    
+    try:
+        shutil.rmtree(result_dir)
+        return True
+    except Exception as e:
+        print(f"Error deleting result {result_id}: {e}")
+        return False
