@@ -14,6 +14,7 @@ from utils.helpers import get_image_download_link, seed_everything
 from user_management import initialize_database, save_user_result
 from authentication import show_login_page, get_current_user
 from user_history import show_history_page, show_result_details
+from huggingface_hub import hf_hub_download
 
 st.set_page_config(
     page_title="Fruit Ripeness Detection",
@@ -48,8 +49,16 @@ seed_everything(42)
 os.makedirs('results', exist_ok=True)
 
 @st.cache_resource
-def load_models(seg_model_path="best_model.pth", classifier_model_path="fruit_classifier_full.pth"):
-    """Load models with caching for better performance"""
+def load_models(
+    seg_model_repo="TentenPolllo/fruitripeness",
+    classifier_model_path="fruit_classifier_full.pth"
+):
+    """Load segmentation model from HF Hub and classifier locally"""
+    seg_model_path = hf_hub_download(
+        repo_id=seg_model_repo,
+        filename="best_model.pth",
+    )
+    
     return FruitRipenessSystem(
         seg_model_path=seg_model_path,
         classifier_model_path=classifier_model_path

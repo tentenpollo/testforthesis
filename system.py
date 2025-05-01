@@ -73,53 +73,48 @@ def resize_and_compress_image(image_path, max_size=(800, 800), quality=85, max_f
         return output_path
     
 class FruitRipenessSystem:
-    def __init__(self, seg_model_path="best_model.pth", classifier_model_path="fruit_classifier_full.pth"):
+    def __init__(self, seg_model_path, classifier_model_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        # --- Segmentation Model (from Hugging Face) ---
+        self.seg_model = UNetResNet50(n_classes=1).to(self.device)
+        if os.path.exists(seg_model_path):
+            self.seg_model.load_state_dict(torch.load(seg_model_path, map_location=self.device))
+            print(f"✅ Loaded segmentation model from HF Hub: {os.path.basename(seg_model_path)}")
+        else:
+            raise FileNotFoundError(f"Segmentation model not found at {seg_model_path}")
+        
+        # --- Classifier Model (local) ---
+        self.class_names = ["tomato", "pineapple", "apple", "banana", "orange"]
+        self.classifier_model = FruitClassifier(num_classes=len(self.class_names)).to(self.device)
+        
+        if os.path.exists(classifier_model_path):
+            checkpoint = torch.load(classifier_model_path, map_location=self.device)
+            if 'model_state_dict' in checkpoint:
+                self.classifier_model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                self.classifier_model.load_state_dict(checkpoint)
+            print(f"✅ Loaded classifier model locally: {os.path.basename(classifier_model_path)}")
+        else:
+            print("⚠️ Using randomly initialized classifier weights")
+        
+        self.seg_model.eval()
+        self.classifier_model.eval()
+        
         self.fruit_to_model = {
-            "tomato": "tomates_4_classe/1",   
+            "tomato": "tomates_4_classe/1",
             "pineapple": "pineapple-maturity-project-app/1",
             "banana": "banana-project/2",
             "strawberry": "strawberry-ml-detection-02/1",
             "mango": "-3vli4/1",
         }
-        
-        self.supported_fruits = ["tomato", "pineapple", "banana", "strawberry", "mango"]
-        
+        self.supported_fruits = list(self.fruit_to_model.keys())
         os.makedirs('results', exist_ok=True)
         
         self.roboflow_client = InferenceHTTPClient(
             api_url="https://detect.roboflow.com",
             api_key="UNykbkEetYICFkzzjcqP"
         )
-        
-        self.seg_model = UNetResNet50(n_classes=1).to(self.device)
-        if seg_model_path and os.path.exists(seg_model_path):
-            self.seg_model.load_state_dict(torch.load(seg_model_path, map_location=self.device))
-            print(f"Loaded segmentation model from: {seg_model_path}")
-        else:
-            print("No segmentation model loaded, using default initialization")
-        self.seg_model.eval()  
-
-        self.class_names = ["tomato", "pineapple", "apple", "banana", "orange"]
-        
-        self.classifier_model = FruitClassifier(num_classes=len(self.class_names)).to(self.device)
-        if classifier_model_path and os.path.exists(classifier_model_path):
-            checkpoint = torch.load(classifier_model_path, map_location=self.device)
-            if 'class_names' in checkpoint:
-                self.class_names = checkpoint['class_names']
-                
-                self.classifier_model = FruitClassifier(num_classes=len(self.class_names)).to(self.device)
-                
-            if 'model_state_dict' in checkpoint:
-                self.classifier_model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                self.classifier_model.load_state_dict(checkpoint)
-            print(f"Loaded classifier model from: {classifier_model_path}")
-            print(f"Classes: {self.class_names}")
-        else:
-            print("No classifier model loaded, using default initialization")
-        self.classifier_model.eval()  
         
         self.seg_transform = transforms.Compose([
             transforms.Resize((256, 256)),
