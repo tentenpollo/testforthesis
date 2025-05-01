@@ -530,7 +530,6 @@ def main():
         "Mango": "🥭"
     }
     with st.sidebar:
-        st.image("https://raw.githubusercontent.com/streamlit/streamlit/master/docs/img/apple.png", width=100)
         st.title("🍎 Fruit Ripeness")
         
         # Check authentication status
