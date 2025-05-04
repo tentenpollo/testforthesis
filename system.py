@@ -76,15 +76,31 @@ class FruitRipenessSystem:
     def __init__(self, seg_model_path, classifier_model_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # --- Segmentation Model (from Hugging Face) ---
+        # --- Enhanced Model (from Hugging Face) ---
+        from models.segmentation_model import UNetResNet50
         self.seg_model = UNetResNet50(n_classes=1).to(self.device)
         if os.path.exists(seg_model_path):
             self.seg_model.load_state_dict(torch.load(seg_model_path, map_location=self.device))
-            print(f"✅ Loaded segmentation model from HF Hub: {os.path.basename(seg_model_path)}")
+            print(f"✅ Loaded enhanced segmentation model from HF Hub: {os.path.basename(seg_model_path)}")
         else:
             raise FileNotFoundError(f"Segmentation model not found at {seg_model_path}")
         
-        # --- Classifier Model (local) ---
+        from models.enhanced_model import extend_unet_resnet50_class
+        extend_unet_resnet50_class()
+        self.seg_model.activations = {}
+        self.seg_model.register_hooks()
+        
+        from models.baseline_unet import load_pretrained_unet, register_hooks
+        try:
+            self.baseline_model = load_pretrained_unet(self.device)
+            self.baseline_model = register_hooks(self.baseline_model)
+            self.baseline_model.eval()
+        except Exception as e:
+            print(f"⚠️ Error setting up pretrained U-Net: {str(e)}")
+            from models.baseline_model import BasicUNet
+            self.baseline_model = BasicUNet(n_classes=1).to(self.device)
+            print("⚠️ Using randomly initialized baseline U-Net (comparison will be less meaningful)")
+        
         self.class_names = ["tomato", "pineapple", "apple", "banana", "orange"]
         self.classifier_model = FruitClassifier(num_classes=len(self.class_names)).to(self.device)
         
@@ -100,6 +116,19 @@ class FruitRipenessSystem:
         
         self.seg_model.eval()
         self.classifier_model.eval()
+        
+        # Define key layers for comparison
+        self.key_comparison_layers = {
+            "Encoder 1": ("enc1_conv1", "encoder1_conv1"),
+            "Encoder 2": ("enc2_conv1", "encoder2_conv1"),
+            "Encoder 3": ("enc3_conv1", "encoder3_conv1"),
+            "Encoder 4": ("enc4_conv1", "encoder4_conv1"),
+            "Bottleneck": ("bottleneck", "center"),
+            "Decoder 4": ("dec4_conv1", "decoder5_conv1"),
+            "Decoder 3": ("dec3_conv1", "decoder4_conv1"),
+            "Decoder 2": ("dec2_conv1", "decoder3_conv1"),
+            "Decoder 1": ("dec1_conv1", "decoder2_conv1"),
+        }
         
         self.fruit_to_model = {
             "tomato": "tomates_4_classe/1",
@@ -129,19 +158,11 @@ class FruitRipenessSystem:
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
     
-    def segment_fruit(self, image_path_or_file, refine_segmentation=True, refinement_method="all"):
+    def segment_fruit_with_metrics(self, image_path_or_file, refine_segmentation=True, refinement_method="all"):
         """
-        Segment the fruit from the background in an image
-        
-        Args:
-            image_path_or_file: Path to image file or file-like object
-            refine_segmentation: Whether to refine the segmentation mask
-            refinement_method: Method for mask refinement
-            
-        Returns:
-            Original image, segmented image, mask, and path to saved segmented image
+        Segment fruit and collect comparative metrics between baseline and enhanced models
         """
-        print(f"Segmenting fruit...")
+        print(f"Segmenting fruit with metrics...")
         
         # Open and preprocess the image
         if isinstance(image_path_or_file, str):
@@ -149,48 +170,157 @@ class FruitRipenessSystem:
             image_path = image_path_or_file
         else:
             img = Image.open(image_path_or_file).convert('RGB')
-            # Create a temporary filename for saving
             timestamp = int(time.time())
             image_path = f"results/uploaded_image_{timestamp}.png"
             img.save(image_path)
         
         original_size = img.size
+        
+        # Apply the same transform to input for both models
         img_tensor = self.seg_transform(img).unsqueeze(0).to(self.device)
         
-        # Generate mask with segmentation model
+        # Import the adapter function for handling channel differences
+        from models.baseline_unet import adapt_input_channels
+        
+        # Track inference time for both models
+        start_baseline = time.time()
         with torch.no_grad():
-            output = self.seg_model(img_tensor)
-            mask = torch.sigmoid(output) > 0.5
-            mask = mask.squeeze().cpu().numpy().astype(np.uint8)
+            # Adapt input channels for the baseline model
+            baseline_input = adapt_input_channels(img_tensor, target_channels=3)
+            baseline_output = self.baseline_model(baseline_input)
+            baseline_mask = torch.sigmoid(baseline_output) > 0.5
+            baseline_mask = baseline_mask.squeeze().cpu().numpy().astype(np.uint8)
+        baseline_time = time.time() - start_baseline
         
-        # Resize mask back to original image size
-        mask = cv2.resize(mask, (original_size[0], original_size[1]), interpolation=cv2.INTER_NEAREST)
+        start_enhanced = time.time()
+        with torch.no_grad():
+            enhanced_output = self.seg_model(img_tensor)
+            enhanced_mask = torch.sigmoid(enhanced_output) > 0.5
+            enhanced_mask = enhanced_mask.squeeze().cpu().numpy().astype(np.uint8)
+        enhanced_time = time.time() - start_enhanced
         
-        # Refine the mask if requested
+        # Resize masks back to original image size
+        baseline_mask = cv2.resize(baseline_mask, (original_size[0], original_size[1]), interpolation=cv2.INTER_NEAREST)
+        enhanced_mask = cv2.resize(enhanced_mask, (original_size[0], original_size[1]), interpolation=cv2.INTER_NEAREST)
+        
+        # Process enhanced mask with refinement if requested
         if refine_segmentation:
             print(f"Refining segmentation mask with method: {refinement_method}")
-            refined_mask = refine_mask(mask, refinement_method=refinement_method)
+            refined_mask = refine_mask(enhanced_mask, refinement_method=refinement_method)
             
-            # Calculate quality metrics for both masks for comparison
-            original_metrics = get_mask_quality_metrics(mask)
+            # Calculate quality metrics for comparison
+            original_metrics = get_mask_quality_metrics(enhanced_mask)
             refined_metrics = get_mask_quality_metrics(refined_mask)
             
             print(f"Original mask metrics: {original_metrics}")
             print(f"Refined mask metrics: {refined_metrics}")
             
             # Use the refined mask
-            mask = refined_mask
+            enhanced_mask = refined_mask
         
-        # Apply mask to original image
-        segmented_img = apply_mask_to_image(img, mask)
+        # Apply masks to original image
+        baseline_img = apply_mask_to_image(img, baseline_mask)
+        enhanced_img = apply_mask_to_image(img, enhanced_mask)
         
-        # Save the segmented image
+        # Save the enhanced segmented image
         timestamp = int(time.time())
         segmented_path = f"results/segmented_{timestamp}_{os.path.basename(image_path)}"
-        segmented_img.save(segmented_path)
-        print(f"Saved segmented image to: {segmented_path}")
+        enhanced_img.save(segmented_path)
         
-        return img, segmented_img, mask, segmented_path
+        # Generate comparison metrics
+        from visualization_metrics import (
+            compare_model_metrics, generate_comparison_visualization,
+            visualize_regularization_impact, feature_map_visualization
+        )
+        
+        comparison_metrics = compare_model_metrics(
+            self.baseline_model, self.seg_model, self.key_comparison_layers
+        )
+        
+        # Generate visualizations
+        visualizations = generate_comparison_visualization(
+            self.baseline_model, self.seg_model, self.key_comparison_layers
+        )
+        
+        try:
+            reg_visualization = visualize_regularization_impact(self.seg_model)
+        except Exception as e:
+            print(f"Warning: Could not create regularization visualization: {e}")
+            reg_visualization = None
+        
+        
+        feature_visualizations = {
+            "Baseline Encoder": feature_map_visualization(
+                self.baseline_model.activations.get("enc3_conv1"), "Baseline Encoder Features"
+            ),
+            "Enhanced Encoder": feature_map_visualization(
+                self.seg_model.activations.get("encoder3_conv1"), "Enhanced Encoder Features"
+            )
+        }
+        
+        # If available, add SFP and dynamic reg visualizations
+        if hasattr(self.seg_model, 'activations'):
+            if "sfp3_out" in self.seg_model.activations:
+                feature_visualizations["SFP Output"] = feature_map_visualization(
+                    self.seg_model.activations["sfp3_out"], "Stochastic Feature Pyramid Output"
+                )
+            if "reg3_out" in self.seg_model.activations:
+                feature_visualizations["Dynamic Reg Output"] = feature_map_visualization(
+                    self.seg_model.activations["reg3_out"], "Dynamic Regularization Output"
+                )
+        
+        # Calculate improved IoU between masks
+        intersection = np.logical_and(baseline_mask, enhanced_mask).sum()
+        union = np.logical_or(baseline_mask, enhanced_mask).sum()
+        iou = intersection / union if union > 0 else 0
+        
+        # Calculate mask quality improvements
+        baseline_coverage = baseline_mask.sum() / (baseline_mask.shape[0] * baseline_mask.shape[1])
+        enhanced_coverage = enhanced_mask.sum() / (enhanced_mask.shape[0] * enhanced_mask.shape[1])
+        
+        # Calculate boundary complexity
+        baseline_contours, _ = cv2.findContours(baseline_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        enhanced_contours, _ = cv2.findContours(enhanced_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        baseline_complexity = 0
+        enhanced_complexity = 0
+        
+        if baseline_contours:
+            baseline_perimeter = sum(cv2.arcLength(cnt, True) for cnt in baseline_contours)
+            baseline_area = sum(cv2.contourArea(cnt) for cnt in baseline_contours)
+            baseline_complexity = baseline_perimeter**2 / (4 * np.pi * baseline_area) if baseline_area > 0 else 0
+            
+        if enhanced_contours:
+            enhanced_perimeter = sum(cv2.arcLength(cnt, True) for cnt in enhanced_contours)
+            enhanced_area = sum(cv2.contourArea(cnt) for cnt in enhanced_contours)
+            enhanced_complexity = enhanced_perimeter**2 / (4 * np.pi * enhanced_area) if enhanced_area > 0 else 0
+        
+        # Return all results with metrics
+        return {
+            "original_image": img,
+            "segmented_image": enhanced_img,
+            "mask": enhanced_mask,
+            "segmented_image_path": segmented_path,
+            "comparison_metrics": {
+                "baseline_time": baseline_time,
+                "enhanced_time": enhanced_time,
+                "speedup": baseline_time / enhanced_time if enhanced_time > 0 else 0,
+                "baseline_mask": baseline_mask,
+                "baseline_segmented_image": baseline_img,
+                "iou": iou,
+                "baseline_coverage": baseline_coverage,
+                "enhanced_coverage": enhanced_coverage,
+                "baseline_complexity": baseline_complexity,
+                "enhanced_complexity": enhanced_complexity,
+                "layer_metrics": comparison_metrics
+            },
+            "visualizations": visualizations,
+            "feature_maps": feature_visualizations,
+            "regularization_viz": reg_visualization,
+            "mask_metrics": get_mask_quality_metrics(enhanced_mask),
+            "refine_segmentation": refine_segmentation,
+            "refinement_method": refinement_method
+        }
     
     def classify_fruit(self, image):
         """
@@ -270,37 +400,31 @@ class FruitRipenessSystem:
     def process_image_with_visualization(self, image_path_or_file, fruit_type, refine_segmentation=True, refinement_method="all", angle_name=None):
         """
         Process an image and create visualizations with optional mask refinement
-        
-        Args:
-            image_path_or_file: Path to image file or file-like object
-            fruit_type: Type of fruit to process (user-selected)
-            refine_segmentation: Whether to refine the segmentation mask
-            refinement_method: Method for mask refinement
-            angle_name: Optional name for the angle (for patch-based analysis)
-            
-        Returns:
-            Dictionary with processing results and visualization paths
         """
         try:
             if angle_name:
                 print(f"Processing {angle_name} view...")
             
-            # Step 1: Segment the fruit with refinement option
-            original_img, segmented_img, mask, segmented_path = self.segment_fruit(
+            # Step 1: Segment the fruit with metrics and refinement option
+            segmentation_results = self.segment_fruit_with_metrics(
                 image_path_or_file,
                 refine_segmentation=refine_segmentation,
                 refinement_method=refinement_method
             )
             
-            # Get the original image path (for reference only)
+            # Extract key components from results
+            original_img = segmentation_results["original_image"]
+            segmented_img = segmentation_results["segmented_image"]
+            mask = segmentation_results["mask"]
+            segmented_path = segmentation_results["segmented_image_path"]
+            
+            # Get the original image path
             if isinstance(image_path_or_file, str):
                 original_path = image_path_or_file
             else:
-                # The path was saved in segment_fruit
                 original_path = segmented_path.replace("segmented_", "uploaded_image_")
             
-            # Step 2: Use the user-selected fruit type
-            # Normalize the fruit type - strip whitespace and convert to lowercase
+            # Step 2: Use the user-selected fruit type and detect ripeness
             fruit_type_normalized = fruit_type.lower().strip()
             
             ripeness_result = self.detect_ripeness_with_mask(
@@ -313,6 +437,7 @@ class FruitRipenessSystem:
                 # Format the results
                 formatted_results = self.format_ripeness_results(fruit_type, predictions)
                 
+                # Create result dictionary
                 result = {
                     "fruit_type": fruit_type,
                     "classification_confidence": 1.0,  # Using 1.0 as confidence since user-selected
@@ -331,10 +456,18 @@ class FruitRipenessSystem:
                 if angle_name:
                     result["angle_name"] = angle_name
                 
-                # If successful, add visualizations
+                # Add the comparison metrics
+                result.update({
+                    "comparison_metrics": segmentation_results["comparison_metrics"],
+                    "visualizations": segmentation_results["visualizations"],
+                    "feature_maps": segmentation_results["feature_maps"],
+                    "regularization_viz": segmentation_results["regularization_viz"]
+                })
+                
+                # Create ripeness visualizations
                 try:
                     vis_results = self.visualize_results(result)
-                    result.update({"visualizations": vis_results})
+                    result.update({"visualizations": {**result["visualizations"], **vis_results}})
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
@@ -342,9 +475,10 @@ class FruitRipenessSystem:
                 
                 return result
             else:
+                # Handle case with no predictions
                 result = {
                     "fruit_type": fruit_type,
-                    "classification_confidence": 1.0,  # Using 1.0 as confidence since user-selected
+                    "classification_confidence": 1.0,
                     "error": "No ripeness predictions found",
                     "segmented_image": segmented_img,
                     "original_image": original_img,
@@ -360,15 +494,23 @@ class FruitRipenessSystem:
                 if angle_name:
                     result["angle_name"] = angle_name
                 
-                # Add visualizations even if no predictions are found
+                # Add the comparison metrics
+                result.update({
+                    "comparison_metrics": segmentation_results["comparison_metrics"],
+                    "visualizations": segmentation_results["visualizations"],
+                    "feature_maps": segmentation_results["feature_maps"],
+                    "regularization_viz": segmentation_results["regularization_viz"]
+                })
+                
+                # Create visualizations anyway
                 try:
                     vis_results = self.visualize_results(result)
-                    result.update({"visualizations": vis_results})
+                    result.update({"visualizations": {**result["visualizations"], **vis_results}})
                 except Exception as e:
                     result["visualization_error"] = str(e)
                 
                 return result
-            
+                
         except Exception as e:
             import traceback
             traceback.print_exc()

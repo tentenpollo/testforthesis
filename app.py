@@ -15,6 +15,7 @@ from user_management import initialize_database, save_user_result
 from authentication import show_login_page, get_current_user
 from user_history import show_history_page, show_result_details
 from huggingface_hub import hf_hub_download
+from evaluation_page import add_evaluation_page_to_app
 
 st.set_page_config(
     page_title="Fruit Ripeness Detection",
@@ -256,9 +257,117 @@ def display_results(results, system, use_segmentation, username):
                     metrics = results["mask_metrics"]
                     st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
                     st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+                    
+                # Add Model Comparison section if available
+                if "comparison_metrics" in results:
+                    st.write("---")
+                    st.subheader("🔍 Base U-Net vs Enhanced U-Net Comparison")
+                    
+                    comparison = results["comparison_metrics"]
+                    
+                    # Performance Metrics
+                    st.write("**Performance Comparison:**")
+                    perf_col1, perf_col2, perf_col3 = st.columns(3)
+                    
+                    with perf_col1:
+                        st.metric("Base U-Net Time", f"{comparison['baseline_time']*1000:.1f} ms")
+                    
+                    with perf_col2:
+                        st.metric("Enhanced U-Net Time", f"{comparison['enhanced_time']*1000:.1f} ms")
+                    
+                    with perf_col3:
+                        speedup = comparison['speedup']
+                        st.metric("Speedup", f"{speedup:.2f}x", f"{(speedup-1)*100:.1f}%")
+                    
+                    # Segmentation Quality Metrics
+                    st.write("**Segmentation Quality Comparison:**")
+                    qual_col1, qual_col2, qual_col3 = st.columns(3)
+                    
+                    with qual_col1:
+                        st.metric("IoU between models", f"{comparison['iou']:.2f}")
+                    
+                    
+                    with qual_col2:
+                        st.metric("Boundary Detail", f"{comparison['enhanced_complexity']:.2f}", 
+                                f"{comparison['enhanced_complexity'] - comparison['baseline_complexity']:.2f} vs Base")
+                    
+                    # Side by side image comparison
+                    st.write("**Visual Segmentation Comparison:**")
+                    base_col, enhanced_col = st.columns(2)
+                    
+                    with base_col:
+                        st.write("Base U-Net Result")
+                        st.image(comparison["baseline_segmented_image"], use_container_width=True)
+                    
+                    with enhanced_col:
+                        st.write("Enhanced U-Net Result")
+                        st.image(results["segmented_image"], use_container_width=True)
+                    
+                    # Neural Network Visualizations
+                    st.write("---")
+                    st.subheader("🧠 Neural Network Layer Visualizations")
+                    
+                    tab1, tab2, tab3 = st.tabs(["Feature Maps", "Layer-by-Layer Comparison", "Regularization"])
+                    
+                    with tab1:
+                        if "feature_maps" in results:
+                            for name, viz in results["feature_maps"].items():
+                                st.write(f"**{name}:**")
+                                st.image(viz, use_container_width=True)
+                    
+                    with tab2:
+                        if "visualizations" in results:
+                            for layer_name, viz in results["visualizations"].items():
+                                st.write(f"**{layer_name} Layer Comparison:**")
+                                st.image(viz, use_container_width=True)
+                                
+                                # Add metrics table for this layer
+                                if "layer_metrics" in comparison and layer_name in comparison["layer_metrics"]:
+                                    layer_metric = comparison["layer_metrics"][layer_name]
+                                    
+                                    metric_data = {
+                                        "Metric": ["Mean Activation", "Standard Deviation", "Feature Entropy"],
+                                        "Base U-Net": [
+                                            f"{layer_metric['baseline']['mean_activation']:.4f}",
+                                            f"{layer_metric['baseline']['std_activation']:.4f}",
+                                            f"{layer_metric['baseline']['entropy']:.4f}"
+                                        ],
+                                        "Enhanced U-Net": [
+                                            f"{layer_metric['enhanced']['mean_activation']:.4f}",
+                                            f"{layer_metric['enhanced']['std_activation']:.4f}",
+                                            f"{layer_metric['enhanced']['entropy']:.4f}"
+                                        ],
+                                        "Improvement": [
+                                            f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
+                                            f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
+                                            f"{layer_metric['entropy_improvement']:.1f}%"
+                                        ]
+                                    }
+                                    
+                                    st.table(metric_data)
+                    
+                    with tab3:
+                        if "regularization_viz" in results and results["regularization_viz"] is not None:
+                            st.write("**Impact of Dynamic Regularization:**")
+                            st.image(results["regularization_viz"], use_container_width=True)
+                            
+                            st.write("""
+                            The chart above shows the L1 regularization values applied by the dynamic regularization modules.
+                            Higher values indicate stronger regularization, which helps prevent overfitting.
+                            """)
+                    
+                    # Explanation of architectural improvements
+                    st.write("---")
+                    st.subheader("📚 Enhanced U-Net Architecture Improvements")
+                    
+                    st.write("""
+                    1. **Stochastic Feature Pyramid (SFP)** - Improves multi-scale feature extraction
+                    2. **Dynamic Regularization** - Adaptive regularization to prevent overfitting
+                    3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
+                    """)
             else:
-                st.write("**Note:** Segmentation was disabled for this analysis. The original image was sent directly to the ripeness detector.")
-            
+                st.write("**Note:** Segmentation was disabled for this analysis.")
+                
             st.write("**Model Processing Information:**")
             st.write(f"- Device used: {system.device}")
             st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
@@ -272,8 +381,6 @@ def display_results(results, system, use_segmentation, username):
             if "raw_results" in results:
                 st.write("**Raw Ripeness Detection Results:**")
                 st.json(results["raw_results"])
-                
-            st.subheader("Save Results")
     
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
@@ -538,11 +645,12 @@ def main():
             st.write(f"👋 Welcome, {current_user}!")
             
             st.subheader("Navigation")
-            nav_options = ["Home", "Analysis History", "About"]
+            nav_options = ["Home", "Analysis History", "About", "Evaluation"]
             
             nav_map = {
                 "Home": "home",
                 "Analysis History": "history",
+                "Evaluation": "evaluation",
                 "About": "about"
             }
             
@@ -632,6 +740,9 @@ def main():
         For more accurate results, you can upload images of the same fruit from multiple angles.
         The system analyzes each angle separately and combines the results for a comprehensive assessment.
         """)
+        
+    elif st.session_state.page == "evaluation":
+        add_evaluation_page_to_app()
         
     else:
         st.title("🍎 Fruit Ripeness Detection System")
