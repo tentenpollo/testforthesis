@@ -52,19 +52,19 @@ os.makedirs('results', exist_ok=True)
 @st.cache_resource
 def load_models(
     seg_model_repo="TentenPolllo/fruitripeness",
-    seg_model_filename="best_model.pth",
-    classifier_model_repo="TentenPolllo/fruitripeness",  # Use your actual HF repo name
-    classifier_model_filename="fruit_classifier_full.pth"
+    classifier_model_repo="TentenPolllo/FruitClassifier"  # Updated to your new repo
 ):
     """Load both segmentation and classifier models from HF Hub"""
+    # Load segmentation model from Hugging Face
     seg_model_path = hf_hub_download(
         repo_id=seg_model_repo,
-        filename=seg_model_filename,
+        filename="best_model.pth",
     )
     
+    # Load classifier model from the new repository
     classifier_model_path = hf_hub_download(
         repo_id=classifier_model_repo,
-        filename=classifier_model_filename,
+        filename="fruit_classifier_full.pth",
     )
     
     return FruitRipenessSystem(
