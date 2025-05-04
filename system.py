@@ -110,7 +110,7 @@ class FruitRipenessSystem:
                 self.classifier_model.load_state_dict(checkpoint['model_state_dict'])
             else:
                 self.classifier_model.load_state_dict(checkpoint)
-            print(f"✅ Loaded classifier model locally: {os.path.basename(classifier_model_path)}")
+            print(f"✅ Loaded classifier model from HF Hub: {os.path.basename(classifier_model_path)}")
         else:
             print("⚠️ Using randomly initialized classifier weights")
         

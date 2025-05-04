@@ -52,19 +52,26 @@ os.makedirs('results', exist_ok=True)
 @st.cache_resource
 def load_models(
     seg_model_repo="TentenPolllo/fruitripeness",
-    classifier_model_path="fruit_classifier_full.pth"
+    seg_model_filename="best_model.pth",
+    classifier_model_repo="TentenPolllo/fruitripeness",  # Use your actual HF repo name
+    classifier_model_filename="fruit_classifier_full.pth"
 ):
-    """Load segmentation model from HF Hub and classifier locally"""
+    """Load both segmentation and classifier models from HF Hub"""
     seg_model_path = hf_hub_download(
         repo_id=seg_model_repo,
-        filename="best_model.pth",
+        filename=seg_model_filename,
+    )
+    
+    classifier_model_path = hf_hub_download(
+        repo_id=classifier_model_repo,
+        filename=classifier_model_filename,
     )
     
     return FruitRipenessSystem(
         seg_model_path=seg_model_path,
         classifier_model_path=classifier_model_path
     )
-
+    
 def combine_multi_angle_results(results_list):
     """
     Combine results from multiple angles of the same fruit
