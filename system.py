@@ -8,7 +8,7 @@ import cv2
 from torchvision import transforms
 import io
 
-from inference_sdk import InferenceHTTPClient
+from inference_sdk import InferenceHTTPClient, InferenceConfiguration
 import os
 
 from improved_visualization import create_enhanced_visualization, create_side_by_side_comparison, create_combined_visualization
@@ -16,6 +16,7 @@ from mask_refinement import refine_mask, get_mask_quality_metrics
 from models.segmentation_model import UNetResNet50
 from models.classifier_model import FruitClassifier
 from utils.helpers import apply_mask_to_image
+from models.custom_model_inference import CustomModelInference
 
 def resize_and_compress_image(image_path, max_size=(800, 800), quality=85, max_file_size_kb=1024):
         original_size_kb = os.path.getsize(image_path) / 1024
@@ -71,6 +72,41 @@ def resize_and_compress_image(image_path, max_size=(800, 800), quality=85, max_f
         print("Warning: Could not reduce image below target size. API may still reject it.")
         img.save(output_path, format="JPEG", quality=10)
         return output_path
+
+def crop_bounding_box(image, bbox):
+        """
+        Crop a bounding box from an image
+        
+        Args:
+            image: PIL Image or numpy array
+            bbox: Dictionary with x, y, width, height (center coordinates format)
+            
+        Returns:
+            Cropped PIL Image
+        """
+        # Convert PIL Image to numpy array if needed
+        if isinstance(image, Image.Image):
+            img_array = np.array(image)
+        else:
+            img_array = image
+        
+        # Convert center coordinates to top-left and bottom-right
+        x = bbox.get("x", 0)
+        y = bbox.get("y", 0)
+        width = bbox.get("width", 0)
+        height = bbox.get("height", 0)
+        
+        # Calculate bounding box coordinates
+        x1 = max(0, int(x - width / 2))
+        y1 = max(0, int(y - height / 2))
+        x2 = min(img_array.shape[1], int(x + width / 2))
+        y2 = min(img_array.shape[0], int(y + height / 2))
+        
+        # Crop the image
+        cropped = img_array[y1:y2, x1:x2]
+        
+        # Convert back to PIL Image
+        return Image.fromarray(cropped)
     
 class FruitRipenessSystem:
     def __init__(self, seg_model_path, classifier_model_path):
@@ -114,6 +150,8 @@ class FruitRipenessSystem:
         else:
             print("⚠️ Using randomly initialized classifier weights")
         
+        self.custom_model_handler = CustomModelInference(self.device)
+        
         self.seg_model.eval()
         self.classifier_model.eval()
         
@@ -137,12 +175,26 @@ class FruitRipenessSystem:
             "strawberry": "strawberry-ml-detection-02/1",
             "mango": "mango-detection-goiq9/1",
         }
+        
+        self.classification_models = {
+            "banana": {"type": "roboflow", "model_id": "pisang_susu/1"},
+            "mango": {"type": "roboflow", "model_id": "mango-c80fq/1"},
+            "tomato": {"type": "roboflow", "model_id": "classification-tomatoes/2"},
+            "strawberry": {"type": "custom", "model_key": "strawberry"},
+            "pineapple": {"type": "roboflow", "model_id": "pineapple-maturity-project-app/1"}
+        }
+        
         self.supported_fruits = list(self.fruit_to_model.keys())
         os.makedirs('results', exist_ok=True)
-        
+
         self.roboflow_client = InferenceHTTPClient(
             api_url="https://detect.roboflow.com",
-            api_key="UNykbkEetYICFkzzjcqP"
+            api_key="UNykbkEetYICFkzzjcqP",
+        )
+        
+        self.classification_config = InferenceConfiguration(
+            confidence_threshold=0.01,  # Very low threshold to get all predictions
+            max_detections=100  # Increase max detections
         )
         
         self.seg_transform = transforms.Compose([
@@ -230,7 +282,7 @@ class FruitRipenessSystem:
         # Generate comparison metrics
         from visualization_metrics import (
             compare_model_metrics, generate_comparison_visualization,
-            visualize_regularization_impact, feature_map_visualization
+            visualize_regularization_impact_comparison, feature_map_visualization
         )
         
         comparison_metrics = compare_model_metrics(
@@ -243,18 +295,18 @@ class FruitRipenessSystem:
         )
         
         try:
-            reg_visualization = visualize_regularization_impact(self.seg_model)
+            reg_comparison_visualization = visualize_regularization_impact_comparison(self.seg_model)
         except Exception as e:
-            print(f"Warning: Could not create regularization visualization: {e}")
-            reg_visualization = None
+            print(f"Warning: Could not create regularization comparison visualization: {e}")
+            reg_comparison_visualization = None
         
         
         feature_visualizations = {
             "Baseline Encoder": feature_map_visualization(
                 self.baseline_model.activations.get("enc3_conv1"), "Baseline Encoder Features"
             ),
-            "Enhanced Encoder": feature_map_visualization(
-                self.seg_model.activations.get("encoder3_conv1"), "Enhanced Encoder Features"
+            "SPEAR-UNet Encodere": feature_map_visualization(
+                self.seg_model.activations.get("encoder3_conv1"), "SPEARU-Net Encoder Features"
             )
         }
         
@@ -316,7 +368,7 @@ class FruitRipenessSystem:
             },
             "visualizations": visualizations,
             "feature_maps": feature_visualizations,
-            "regularization_viz": reg_visualization,
+            "regularization_comparison_viz": reg_comparison_visualization,
             "mask_metrics": get_mask_quality_metrics(enhanced_mask),
             "refine_segmentation": refine_segmentation,
             "refinement_method": refinement_method
@@ -811,3 +863,445 @@ class FruitRipenessSystem:
             traceback.print_exc()
             print(f"Error using Roboflow model: {str(e)}")
             return {"predictions": [], "error": str(e)}
+        
+    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type):
+        """
+        Enhanced ripeness analysis flow:
+        1. Initial segmentation to remove background
+        2. Use Roboflow detection to get objects
+        3. For each detected object: crop → segment crop → classify
+        """
+        try:
+            # Open and preprocess the image
+            if isinstance(image_path_or_file, str):
+                img = Image.open(image_path_or_file).convert('RGB')
+                image_path = image_path_or_file
+            else:
+                img = Image.open(image_path_or_file).convert('RGB')
+                timestamp = int(time.time())
+                image_path = f"results/uploaded_image_{timestamp}.png"
+                img.save(image_path)
+            
+            # Normalize fruit type
+            fruit_type_normalized = fruit_type.lower().strip()
+            
+            print(f"Performing initial segmentation...")
+            segmentation_results = self.segment_fruit_with_metrics(
+                image_path_or_file,
+                refine_segmentation=True,
+                refinement_method="all"
+            )
+            
+            # Store original image and segmentation results
+            original_img = segmentation_results["original_image"]
+            segmented_img = segmentation_results["segmented_image"]
+            mask = segmentation_results["mask"]
+            
+            # Save segmented image for detection
+            temp_segmented_path = f"results/temp_segmented_{int(time.time())}.png"
+            segmented_img.save(temp_segmented_path)
+            
+            # STEP 2: Use Roboflow to detect objects in the segmented image
+            print(f"Detecting fruits using Roboflow model...")
+            detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
+            if not detection_model_id:
+                raise ValueError(f"No detection model available for {fruit_type}")
+            
+            try:
+                # Get detection results
+                detection_results = self.roboflow_client.infer(
+                    temp_segmented_path, 
+                    model_id=detection_model_id
+                )
+                predictions = detection_results.get("predictions", [])
+                
+                # Clean up temporary file
+                if os.path.exists(temp_segmented_path):
+                    os.remove(temp_segmented_path)
+                    
+                print(f"Detected {len(predictions)} fruits in the image")
+                
+                # If no fruits detected, try a fallback approach
+                if not predictions:
+                    print("No fruits detected by detection model. Using fallback approach...")
+                    # Use connected components as fallback
+                    num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
+                    num_fruits = num_labels - 1
+                    
+                    # If still no fruits, create a single bounding box for the entire image
+                    if num_fruits < 1:
+                        img_width, img_height = original_img.size
+                        predictions = [{
+                            "x": img_width / 2,
+                            "y": img_height / 2,
+                            "width": img_width,
+                            "height": img_height,
+                            "confidence": 1.0,
+                            "class": fruit_type_normalized
+                        }]
+                    else:
+                        # Create bounding boxes for each connected component
+                        predictions = []
+                        for label in range(1, num_labels):  # Skip background (0)
+                            # Create mask for this component
+                            component_mask = (labels == label).astype(np.uint8)
+                            # Find contours
+                            contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            if contours:
+                                # Get bounding box
+                                x, y, w, h = cv2.boundingRect(contours[0])
+                                predictions.append({
+                                    "x": x + w/2,  # Convert to center coordinates
+                                    "y": y + h/2,
+                                    "width": w,
+                                    "height": h,
+                                    "confidence": 0.9,  # Default confidence
+                                    "class": fruit_type_normalized
+                                })
+            except Exception as e:
+                print(f"Error using Roboflow detection model: {str(e)}")
+                # Fallback: use the whole image
+                img_width, img_height = original_img.size
+                predictions = [{
+                    "x": img_width / 2,
+                    "y": img_height / 2,
+                    "width": img_width,
+                    "height": img_height,
+                    "confidence": 1.0,
+                    "class": fruit_type_normalized
+                }]
+            
+            # STEP 3: Process each detected fruit
+            fruits_data = []
+            classification_results = []
+            confidence_distributions = []
+            
+            for i, pred in enumerate(predictions):
+                # Get bounding box coordinates
+                bbox = {
+                    "x": pred.get("x", 0),
+                    "y": pred.get("y", 0),
+                    "width": pred.get("width", 0),
+                    "height": pred.get("height", 0),
+                    "confidence": pred.get("confidence", 0),
+                    "class": pred.get("class", "unknown")
+                }
+                
+                # Process this fruit
+                print(f"Processing fruit #{i+1}...")
+                result = self._process_single_fruit(
+                    original_img, 
+                    segmented_img,
+                    bbox, 
+                    fruit_type_normalized,
+                    self.classification_models,
+                    i
+                )
+                
+                fruits_data.append(result["fruit_data"])
+                classification_results.append(result["classification"])
+                confidence_distributions.append(result["confidence_distribution"])
+            
+            # Combine all results
+            final_result = {
+                "fruit_type": fruit_type,
+                "num_fruits": len(predictions),
+                "original_image": original_img,
+                "segmented_image": segmented_img,
+                "fruits_data": fruits_data,
+                "classification_results": classification_results,
+                "confidence_distributions": confidence_distributions,
+                "segmentation_results": segmentation_results,
+                "mask": mask
+            }
+            
+            return final_result
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"Error in enhanced ripeness analysis: {str(e)}")
+            return {"error": str(e)}
+    
+    def _process_single_fruit(self, original_img, segmented_img, bbox, fruit_type, classification_models, fruit_index):
+        """
+        Process a single fruit through crop → segment → classify pipeline
+        
+        Args:
+            original_img: Original PIL image
+            segmented_img: Segmented PIL image
+            bbox: Bounding box dictionary
+            fruit_type: Normalized fruit type string
+            classification_models: Dictionary of classification models
+            fruit_index: Index of this fruit
+            
+        Returns:
+            Dictionary with fruit data and classification results
+        """
+        try:
+            # STEP 1: Crop the bounding box from both original and segmented images
+            original_crop = crop_bounding_box(original_img, bbox)
+            segmented_crop = crop_bounding_box(segmented_img, bbox)
+            
+            # Save crops for reference
+            timestamp = int(time.time())
+            original_crop_path = f"results/fruit{fruit_index}_original_{timestamp}.png"
+            segmented_crop_path = f"results/fruit{fruit_index}_segmented_{timestamp}.png"
+            original_crop.save(original_crop_path)
+            segmented_crop.save(segmented_crop_path)
+            
+            # STEP 2: Segment the cropped image
+            # Convert segmented crop to binary mask
+            segmented_crop_array = np.array(segmented_crop)
+            # If RGB image, convert to grayscale first
+            if len(segmented_crop_array.shape) == 3 and segmented_crop_array.shape[2] == 3:
+                segmented_crop_gray = cv2.cvtColor(segmented_crop_array, cv2.COLOR_RGB2GRAY)
+            else:
+                segmented_crop_gray = segmented_crop_array
+                
+            # Threshold to get binary mask
+            _, crop_mask = cv2.threshold(segmented_crop_gray, 10, 255, cv2.THRESH_BINARY)
+            
+            # Apply mask to original crop to get clean fruit
+            crop_mask_rgb = cv2.cvtColor(crop_mask, cv2.COLOR_GRAY2RGB)
+            masked_crop = cv2.bitwise_and(np.array(original_crop), crop_mask_rgb)
+            masked_crop_img = Image.fromarray(masked_crop)
+            
+            # Save masked crop
+            masked_crop_path = f"results/fruit{fruit_index}_masked_{timestamp}.png"
+            masked_crop_img.save(masked_crop_path)
+            
+            # STEP 3: Classification
+            classification_result = {}
+            confidence_distribution = {}
+            
+            # Check if classification model is available for this fruit type
+            model_config = classification_models.get(fruit_type)
+            
+            if model_config:
+                # Handle different model types
+                if model_config["type"] == "custom":
+                    # Use custom PyTorch model
+                    confidence_distribution = self.custom_model_handler.classify_image(
+                        masked_crop_img, 
+                        model_config["model_key"]
+                    )
+                    
+                    # Check if error occurred
+                    if "error" in confidence_distribution:
+                        print(f"Error in custom classification: {confidence_distribution['error']}")
+                        # Try to use detection result as fallback
+                        confidence_distribution = self._estimate_from_detection(bbox)
+                    
+                elif model_config["type"] == "roboflow":
+                    # Use Roboflow classification API
+                    model_id = model_config["model_id"]
+                    
+                    try:
+                        # Resize image to appropriate size for classification
+                        resized_crop = masked_crop_img.resize((224, 224))
+                        resized_path = f"results/fruit{fruit_index}_resized_{timestamp}.png"
+                        resized_crop.save(resized_path)
+                        
+                        # Use classification configuration specifically for classification models
+                        with self.roboflow_client.use_configuration(self.classification_config):
+                            classification_result = self.roboflow_client.infer(
+                                resized_path, 
+                                model_id=model_id
+                            )
+                        
+                        print(f"Raw classification results: {classification_result}")
+                        if "predictions" in classification_result:
+                            confidence_distribution = {}
+                            
+                            if "raw_predictions" in classification_result:
+                                all_predictions = classification_result["raw_predictions"]
+                                for pred in all_predictions:
+                                    class_name = pred.get("class", "unknown")
+                                    confidence = pred.get("confidence", 0)
+                                    
+                                    ripeness = self._standardize_ripeness_label(fruit_type, class_name)
+                                    if ripeness:
+                                        confidence_distribution[ripeness] = confidence
+                            else:
+                                # Fall back to regular predictions
+                                for pred in classification_result["predictions"]:
+                                    class_name = pred.get("class", "unknown")
+                                    confidence = pred.get("confidence", 0)
+                                    
+                                    ripeness = self._standardize_ripeness_label(fruit_type, class_name)
+                                    if ripeness:
+                                        confidence_distribution[ripeness] = confidence
+                        
+                        # After processing all predictions, consolidate categories and normalize confidences for bananas
+                        if fruit_type == "banana" and confidence_distribution:
+                            # Create new consolidated distribution with just the three categories
+                            consolidated = {
+                                "Unripe": 0.0,
+                                "Ripe": 0.0,
+                                "Overripe": 0.0
+                            }
+                            
+                            # Sum up confidences for each group
+                            for ripeness, confidence in confidence_distribution.items():
+                                if ripeness == "Unripe":
+                                    consolidated["Unripe"] += confidence
+                                elif ripeness in ["Ripe", "half_ripe"]:
+                                    consolidated["Ripe"] += confidence
+                                elif ripeness in ["Overripe", "nearly_rotten"]:
+                                    consolidated["Overripe"] += confidence
+                            
+                            # Normalize to ensure sum is 1.0
+                            total = sum(consolidated.values())
+                            if total > 0:
+                                for key in consolidated:
+                                    consolidated[key] /= total
+                            
+                            # Replace the original distribution
+                            confidence_distribution = consolidated
+                        
+                        # Clean up
+                        if os.path.exists(resized_path):
+                            os.remove(resized_path)
+                            
+                    except Exception as e:
+                        print(f"Error in Roboflow classification: {str(e)}")
+                        # Try to use detection result as fallback
+                        confidence_distribution = self._estimate_from_detection(bbox)
+                        confidence_distribution["estimated"] = True
+                else:
+                    print(f"Unknown model type: {model_config['type']}")
+                    confidence_distribution = self._estimate_from_detection(bbox)
+                    confidence_distribution["estimated"] = True
+            else:
+                # No classification model available, use detection result
+                confidence_distribution = self._estimate_from_detection(bbox)
+                confidence_distribution["estimated"] = True
+            
+            # Combine results
+            result = {
+                "fruit_data": {
+                    "index": fruit_index,
+                    "bbox": bbox,
+                    "original_crop_path": original_crop_path,
+                    "segmented_crop_path": segmented_crop_path,
+                    "masked_crop_path": masked_crop_path
+                },
+                "classification": classification_result,
+                "confidence_distribution": confidence_distribution
+            }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error processing single fruit: {str(e)}")
+            return {
+                "fruit_data": {
+                    "index": fruit_index,
+                    "bbox": bbox,
+                    "error": str(e)
+                },
+                "classification": {},
+                "confidence_distribution": {"error": str(e)}
+            }
+
+    def _estimate_from_detection(self, bbox):
+        """
+        Estimate confidence distribution based on detection result
+        
+        Args:
+            bbox: Bounding box dictionary with class and confidence
+            
+        Returns:
+            Estimated confidence distribution
+        """
+        ripeness = self._standardize_ripeness_label("", bbox.get("class", "unknown"))
+        confidence = bbox.get("confidence", 0)
+        
+        # Create estimated distribution
+        if ripeness == "Unripe":
+            distribution = {
+                "Unripe": confidence,
+                "Partially Ripe": (1 - confidence) * 0.7,
+                "Ripe": (1 - confidence) * 0.2,
+                "Overripe": (1 - confidence) * 0.1
+            }
+        elif ripeness == "Ripe":
+            distribution = {
+                "Unripe": (1 - confidence) * 0.1,
+                "Partially Ripe": (1 - confidence) * 0.3,
+                "Ripe": confidence,
+                "Overripe": (1 - confidence) * 0.6
+            }
+        elif ripeness == "Overripe":
+            distribution = {
+                "Unripe": (1 - confidence) * 0.05,
+                "Partially Ripe": (1 - confidence) * 0.15,
+                "Ripe": (1 - confidence) * 0.3,
+                "Overripe": confidence
+            }
+        else:
+            distribution = {
+                "Unripe": 0.25,
+                "Partially Ripe": 0.25,
+                "Ripe": 0.25,
+                "Overripe": 0.25
+            }
+        
+        # Mark as estimated
+        distribution["estimated"] = True
+        
+        return distribution
+    
+    def _standardize_ripeness_label(self, fruit_type, class_name):
+        """
+        Standardize ripeness label across different models
+        
+        Args:
+            fruit_type: Type of fruit
+            class_name: Original class name from model
+            
+        Returns:
+            Standardized ripeness label
+        """
+        class_name_lower = class_name.lower()
+        
+        if class_name_lower in ["strawberryripe", "ripe", "freshripe", "pisang_matang"]:
+            return "Ripe"
+        elif class_name_lower in ["strawberryunripe", "unripe", "freshunripe", "green", "pisang_mentah"]:
+            return "Unripe"
+        elif class_name_lower in ["strawberryrotten", "overripe", "rotten", "pisang_busuk"]:
+            return "Overripe"
+        
+        if fruit_type == "banana":
+            # Map banana ripeness classes to just three categories
+            if class_name_lower in ["unripe", "freshunripe", "pisang_mentah"]:
+                return "Unripe"
+            elif class_name_lower in ["half_ripe", "ripe", "freshripe", "pisang_matang"]:
+                return "Ripe"
+            elif class_name_lower in ["nearly_rotten", "overripe", "rotten", "pisang_busuk"]:
+                return "Overripe"
+        elif fruit_type == "tomato":
+            if class_name_lower == "green":
+                return "Unripe"
+            elif class_name_lower in ["breaker", "turning"]:
+                return "Partially Ripe"
+            elif class_name_lower in ["pink", "light_red", "ripe"]:
+                return "Ripe"
+            elif class_name_lower == "red":
+                return "Fully Ripe"
+            elif class_name_lower in ["old", "damaged"]:
+                return "Overripe"
+        elif fruit_type == "mango":
+            # Updated mango classifications
+            if class_name_lower in ["unripe", "unripe-1-20-", "early_ripe-21-40-"]:
+                return "Unripe"
+            elif class_name_lower in ["semiripe", "semi-ripe", "partially_ripe-41-60-", "semi_ripe"]:
+                return "Underripe"  # Renamed from "Partially Ripe" to "Underripe" as requested
+            elif class_name_lower in ["ripe", "ripe-61-80-", "fully ripe"]:
+                return "Ripe"
+            elif class_name_lower in ["overripe", "over_ripe-81-100-", "over-ripe", "perished", "rotten"]:
+                return "Overripe"  # Added "perished" to Overripe category
+        
+        # If no mapping found, return the original class
+        return class_name

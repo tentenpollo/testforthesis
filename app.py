@@ -1,4 +1,3 @@
-
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import streamlit as st
@@ -16,6 +15,7 @@ from authentication import show_login_page, get_current_user
 from user_history import show_history_page, show_result_details
 from huggingface_hub import hf_hub_download
 from evaluation_page import add_evaluation_page_to_app
+from confidence_visualization import visualize_confidence_distribution, visualize_all_fruits_confidence
 
 st.set_page_config(
     page_title="Fruit Ripeness Detection",
@@ -123,10 +123,19 @@ def combine_multi_angle_results(results_list):
     
     return combined
 
-def process_angle_image(system, image_file, fruit_type, angle_name, use_segmentation, refine_segmentation, refinement_method):
+def process_angle_image(system, image_file, fruit_type, angle_name, use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis=False):
     """Process an image for a specific angle in patch-based analysis"""
     try:
-        if use_segmentation:
+        if use_enhanced_analysis:
+            # Use the enhanced two-stage analysis
+            results = system.analyze_ripeness_enhanced(
+                image_file,
+                fruit_type=fruit_type
+            )
+            # Add angle name to results
+            results["angle_name"] = angle_name
+            return results
+        elif use_segmentation:
             results = system.process_image_with_visualization(
                 image_file,
                 fruit_type=fruit_type,
@@ -268,7 +277,7 @@ def display_results(results, system, use_segmentation, username):
                 # Add Model Comparison section if available
                 if "comparison_metrics" in results:
                     st.write("---")
-                    st.subheader("🔍 Base U-Net vs Enhanced U-Net Comparison")
+                    st.subheader("🔍 Base U-Net vs SPEAR-UNet Comparison")
                     
                     comparison = results["comparison_metrics"]
                     
@@ -280,7 +289,7 @@ def display_results(results, system, use_segmentation, username):
                         st.metric("Base U-Net Time", f"{comparison['baseline_time']*1000:.1f} ms")
                     
                     with perf_col2:
-                        st.metric("Enhanced U-Net Time", f"{comparison['enhanced_time']*1000:.1f} ms")
+                        st.metric("SPEAR-UNet Time", f"{comparison['enhanced_time']*1000:.1f} ms")
                     
                     with perf_col3:
                         speedup = comparison['speedup']
@@ -307,7 +316,7 @@ def display_results(results, system, use_segmentation, username):
                         st.image(comparison["baseline_segmented_image"], use_container_width=True)
                     
                     with enhanced_col:
-                        st.write("Enhanced U-Net Result")
+                        st.write("SPEAR-UNet Result")
                         st.image(results["segmented_image"], use_container_width=True)
                     
                     # Neural Network Visualizations
@@ -333,30 +342,30 @@ def display_results(results, system, use_segmentation, username):
                                     layer_metric = comparison["layer_metrics"][layer_name]
                                     
                                     metric_data = {
-                                        "Metric": ["Mean Activation", "Standard Deviation", "Feature Entropy"],
+                                        "Metric": ["Standard Deviation", "Feature Entropy", "Mean Activation",],
                                         "Base U-Net": [
-                                            f"{layer_metric['baseline']['mean_activation']:.4f}",
                                             f"{layer_metric['baseline']['std_activation']:.4f}",
-                                            f"{layer_metric['baseline']['entropy']:.4f}"
+                                            f"{layer_metric['baseline']['entropy']:.4f}",
+                                            f"{layer_metric['baseline']['mean_activation']:.4f}",
                                         ],
-                                        "Enhanced U-Net": [
-                                            f"{layer_metric['enhanced']['mean_activation']:.4f}",
+                                        "SPEAR-UNet": [
                                             f"{layer_metric['enhanced']['std_activation']:.4f}",
-                                            f"{layer_metric['enhanced']['entropy']:.4f}"
+                                            f"{layer_metric['enhanced']['entropy']:.4f}",
+                                                                                        f"{layer_metric['enhanced']['mean_activation']:.4f}",
                                         ],
                                         "Improvement": [
-                                            f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
                                             f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
-                                            f"{layer_metric['entropy_improvement']:.1f}%"
+                                            f"{layer_metric['entropy_improvement']:.1f}%",
+                                            f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
                                         ]
                                     }
                                     
                                     st.table(metric_data)
                     
                     with tab3:
-                        if "regularization_viz" in results and results["regularization_viz"] is not None:
+                        if "regularization_comparison_viz" in results and results["regularization_comparison_viz"] is not None:
                             st.write("**Impact of Dynamic Regularization:**")
-                            st.image(results["regularization_viz"], use_container_width=True)
+                            st.image(results["regularization_comparison_viz"], use_container_width=True)
                             
                             st.write("""
                             The chart above shows the L1 regularization values applied by the dynamic regularization modules.
@@ -365,7 +374,7 @@ def display_results(results, system, use_segmentation, username):
                     
                     # Explanation of architectural improvements
                     st.write("---")
-                    st.subheader("📚 Enhanced U-Net Architecture Improvements")
+                    st.subheader("📚 SPEAR-UNet Architecture Improvements")
                     
                     st.write("""
                     1. **Stochastic Feature Pyramid (SFP)** - Improves multi-scale feature extraction
@@ -447,7 +456,424 @@ def display_results(results, system, use_segmentation, username):
                     st.rerun()
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
+
+def display_enhanced_results(results, system, username):
+    """Display enhanced ripeness analysis results with confidence distributions"""
+    if "error" in results and "fruits_data" not in results:
+        st.error(f"Error: {results['error']}")
+        return
+    
+    fruit_type = results.get("fruit_type", "Unknown")
+    num_fruits = results.get("num_fruits", 0)
+    
+    # Display header info
+    st.header(f"🍎 {fruit_type.title()} Ripeness Analysis")
+    st.write(f"Detected {num_fruits} fruit{'s' if num_fruits != 1 else ''} in the image")
+    
+    # Display images
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Original Image")
+        st.image(results["original_image"], use_container_width=True)
+    
+    with col2:
+        st.subheader("Segmented Image")
+        st.image(results["segmented_image"], use_container_width=True)
+        
+        # Add download link
+        st.markdown(
+            get_image_download_link(
+                results["segmented_image"],
+                "segmented_fruit.png",
+                "Download Segmented Image"
+            ),
+            unsafe_allow_html=True
+        )
+    
+    # Handle multiple fruits
+    if num_fruits > 1:
+        # Create visualization showing all fruits
+        all_fruits_viz_path = visualize_all_fruits_confidence(results)
+        
+        # Display the combined visualization
+        st.subheader("All Fruits Ripeness Analysis")
+        all_fruits_img = Image.open(all_fruits_viz_path)
+        st.image(all_fruits_img, use_container_width=True)
+        
+        # Create tabs for each individual fruit
+        st.subheader("Individual Fruit Analysis")
+        fruit_tabs = st.tabs([f"Fruit #{i+1}" for i in range(num_fruits)])
+        
+        for i, (tab, fruit_data) in enumerate(zip(fruit_tabs, results.get("fruits_data", []))):
+            with tab:
+                confidence_distribution = results.get("confidence_distributions", [])[i] if i < len(results.get("confidence_distributions", [])) else {}
+                
+                # Display fruit image
+                if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
+                    st.subheader(f"Fruit #{i+1} Image")
+                    fruit_img = Image.open(fruit_data["masked_crop_path"])
+                    st.image(fruit_img, width=300)
+                
+                # Display confidence distribution
+                if confidence_distribution and "error" not in confidence_distribution:
+                    # Generate visualization
+                    viz_path = visualize_confidence_distribution(
+                        fruit_data, confidence_distribution, fruit_type
+                    )
+                    
+                    # Display visualization
+                    viz_img = Image.open(viz_path)
+                    st.image(viz_img, use_container_width=True)
+                    
+                    # Add download link
+                    st.markdown(
+                        get_image_download_link(
+                            viz_img,
+                            f"fruit_{i+1}_ripeness.png",
+                            f"Download Fruit #{i+1} Visualization"
+                        ),
+                        unsafe_allow_html=True
+                    )
+                    
+                # Show detailed values
+                with st.expander(f"Detailed Confidence Values for Fruit #{i+1}"):
+                    if confidence_distribution and "error" not in confidence_distribution:
+                        # Filter out non-confidence keys
+                        filtered_distribution = {k: v for k, v in confidence_distribution.items() 
+                                              if k not in ["error", "estimated"]}
+                        
+                        # Create table
+                        confidence_data = {
+                            "Ripeness Level": list(filtered_distribution.keys()),
+                            "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
+                            "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+                        }
+                        
+                        st.table(confidence_data)
+                    else:
+                        st.write("No confidence distribution data available.")
+    else:
+        # Single fruit display
+        confidence_distribution = results.get("confidence_distributions", [])[0] if results.get("confidence_distributions") else {}
+        fruit_data = results.get("fruits_data", [])[0] if results.get("fruits_data") else {}
+        
+        st.subheader("Ripeness Analysis")
+        
+        # Generate visualization
+        if confidence_distribution and "error" not in confidence_distribution:
+            viz_path = visualize_confidence_distribution(
+                fruit_data, confidence_distribution, fruit_type
+            )
             
+            # Display visualization
+            viz_img = Image.open(viz_path)
+            st.image(viz_img, use_container_width=True)
+            
+            # Add download link
+            st.markdown(
+                get_image_download_link(
+                    viz_img,
+                    "ripeness_distribution.png",
+                    "Download Ripeness Visualization"
+                ),
+                unsafe_allow_html=True
+            )
+            
+            # Display confidence breakdown
+            st.subheader("Ripeness Confidence Breakdown")
+            
+            # Filter out non-confidence keys
+            filtered_distribution = {k: v for k, v in confidence_distribution.items() 
+                                  if k not in ["error", "estimated"]}
+            
+            # Create table
+            confidence_data = {
+                "Ripeness Level": list(filtered_distribution.keys()),
+                "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
+                "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+            }
+            
+            st.table(confidence_data)
+        else:
+            st.warning("No confidence distribution data available.")
+    
+    # Technical details
+    with st.expander("Technical Details"):
+        st.write("**Segmentation Mask:**")
+        st.image(results["mask"] * 255, clamp=True, use_container_width=True)
+        
+        if "segmentation_results" in results and "mask_metrics" in results["segmentation_results"]:
+            st.write("**Mask Quality Metrics:**")
+            metrics = results["segmentation_results"]["mask_metrics"]
+            st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+            st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+        elif "mask_metrics" in results:
+            st.write("**Mask Quality Metrics:**")
+            metrics = results["mask_metrics"]
+            st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+            st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+            
+        # Add model information
+        st.write("**Model Processing Information:**")
+        st.write(f"- Device used: {system.device}")
+        st.write(f"- Two-Stage Analysis: Enabled")
+        st.write(f"- Segmentation model input size: 256x256")
+        
+        # Add information about the classification model if available
+        if "classification_results" in results:
+            # Check if classification_results is a list or a dictionary
+            if isinstance(results["classification_results"], list):
+                if len(results["classification_results"]) > 0:
+                    # If it's a list, use the first item if available
+                    first_result = results["classification_results"][0]
+                    if isinstance(first_result, dict):
+                        st.write(f"- Classification model: {first_result.get('model_name', 'Custom Model')}")
+                        st.write(f"- Classification model input size: {first_result.get('input_size', '224x224')}")
+                    else:
+                        st.write("- Classification model: Custom Model")
+                        st.write("- Classification model input size: 224x224")
+                else:
+                    st.write("- Classification model: Custom Model")
+                    st.write("- Classification model input size: 224x224")
+            elif isinstance(results["classification_results"], dict):
+                # If it's a dictionary, use it directly
+                st.write(f"- Classification model: {results['classification_results'].get('model_name', 'Custom Model')}")
+                st.write(f"- Classification model input size: {results['classification_results'].get('input_size', '224x224')}")
+            else:
+                # Fallback if it's neither list nor dict
+                st.write("- Classification model: Custom Model")
+                st.write("- Classification model input size: 224x224")
+        else:
+            st.write("- Classification model: Custom Model")
+            st.write("- Classification model input size: 224x224")
+        
+        # Add raw classification results if available
+        for i, distribution in enumerate(results.get("confidence_distributions", [])):
+            if distribution and "error" not in distribution:
+                st.write(f"**Raw Classification Results (Fruit #{i+1}):**")
+                st.json(distribution)
+                
+        # Neural Network Analysis Tabs
+        st.write("---")
+        st.subheader("🧠 Neural Network Analysis")
+        
+        # Get the comparison metrics from the correct location
+        comparison = None
+        if "comparison_metrics" in results:
+            comparison = results["comparison_metrics"]
+        elif "segmentation_results" in results and "comparison_metrics" in results["segmentation_results"]:
+            comparison = results["segmentation_results"]["comparison_metrics"]
+            
+        if comparison:
+            # Performance Metrics
+            st.write("**Performance Comparison: Base U-Net vs SPEAR-UNet**")
+            perf_col1, perf_col2, perf_col3 = st.columns(3)
+            
+            with perf_col1:
+                st.metric("Base U-Net Time", f"{comparison['baseline_time']*1000:.1f} ms")
+            
+            with perf_col2:
+                st.metric("SPEAR-UNet Time", f"{comparison['enhanced_time']*1000:.1f} ms")
+            
+            with perf_col3:
+                speedup = comparison['speedup']
+                st.metric("Speedup", f"{speedup:.2f}x", f"{(speedup-1)*100:.1f}%")
+            
+            # Segmentation Quality Metrics
+            st.write("**Segmentation Quality Comparison:**")
+            qual_col1, qual_col2, qual_col3 = st.columns(3)
+            
+            with qual_col1:
+                st.metric("IoU between models", f"{comparison['iou']:.2f}")
+            
+            with qual_col2:
+                st.metric("Boundary Detail", f"{comparison['enhanced_complexity']:.2f}", 
+                        f"{comparison['enhanced_complexity'] - comparison['baseline_complexity']:.2f} vs Base")
+            
+            # Side by side image comparison
+            st.write("**Visual Segmentation Comparison:**")
+            base_col, enhanced_col = st.columns(2)
+            
+            with base_col:
+                st.write("Base U-Net Result")
+                if "baseline_segmented_image" in comparison:
+                    st.image(comparison["baseline_segmented_image"], use_container_width=True)
+                else:
+                    st.write("Base U-Net image not available")
+            
+            with enhanced_col:
+                st.write("SPEAR-UNet Result")
+                st.image(results["segmented_image"], use_container_width=True)
+        
+        # Get feature maps
+        feature_maps = None
+        if "feature_maps" in results:
+            feature_maps = results["feature_maps"]
+        elif "segmentation_results" in results and "feature_maps" in results["segmentation_results"]:
+            feature_maps = results["segmentation_results"]["feature_maps"]
+            
+        # Get visualizations
+        visualizations = None
+        if "visualizations" in results:
+            visualizations = results["visualizations"]
+        elif "segmentation_results" in results and "visualizations" in results["segmentation_results"]:
+            visualizations = results["segmentation_results"]["visualizations"]
+            
+        # Get regularization visualization
+        reg_viz = None
+        if "regularization_comparison_viz" in results:
+            reg_viz = results["regularization_comparison_viz"]
+        elif "segmentation_results" in results and "regularization_comparison_viz" in results["segmentation_results"]:
+            reg_viz = results["segmentation_results"]["regularization_comparison_viz"]
+            
+        # Display the tabs only if we have data
+        if feature_maps or visualizations or reg_viz:
+            tab1, tab2, tab3 = st.tabs(["Feature Maps", "Layer-by-Layer Comparison", "Regularization"])
+            
+            with tab1:
+                if feature_maps:
+                    for name, viz in feature_maps.items():
+                        st.write(f"**{name}:**")
+                        st.image(viz, use_container_width=True)
+                else:
+                    st.write("No feature map visualizations available")
+            
+            with tab2:
+                if visualizations:
+                    # Check if visualizations contains segmentation model visualizations (not ripeness ones)
+                    vis_keys = [k for k in visualizations.keys() if k not in ["bounding_box_visualization", 
+                                                                            "comparison_visualization", 
+                                                                            "combined_visualization"]]
+                    if vis_keys:
+                        for key in vis_keys:
+                            st.write(f"**{key} Layer Comparison:**")
+                            st.image(visualizations[key], use_container_width=True)
+                            
+                            # Add metrics table for this layer if available
+                            if comparison and "layer_metrics" in comparison and key in comparison["layer_metrics"]:
+                                layer_metric = comparison["layer_metrics"][key]
+                                
+                                metric_data = {
+                                    "Metric": ["Mean Activation", "Standard Deviation", "Feature Entropy"],
+                                    "Base U-Net": [
+                                        f"{layer_metric['baseline']['mean_activation']:.4f}",
+                                        f"{layer_metric['baseline']['std_activation']:.4f}",
+                                        f"{layer_metric['baseline']['entropy']:.4f}"
+                                    ],
+                                    "SPEAR-UNet": [
+                                        f"{layer_metric['enhanced']['mean_activation']:.4f}",
+                                        f"{layer_metric['enhanced']['std_activation']:.4f}",
+                                        f"{layer_metric['enhanced']['entropy']:.4f}"
+                                    ],
+                                    "Improvement": [
+                                        f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
+                                        f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
+                                        f"{layer_metric['entropy_improvement']:.1f}%"
+                                    ]
+                                }
+                                
+                                st.table(metric_data)
+                    else:
+                        st.write("No layer-by-layer visualizations available")
+                else:
+                    st.write("No layer-by-layer visualizations available")
+            
+            with tab3:
+                if reg_viz is not None:
+                    st.write("**Impact of Dynamic Regularization:**")
+                    st.image(reg_viz, use_container_width=True)
+                    
+                    st.write("""
+                    The chart above shows the L1 regularization values applied by the dynamic regularization modules.
+                    Higher values indicate stronger regularization, which helps prevent overfitting.
+                    """)
+                else:
+                    st.write("No regularization visualization available")
+            
+            # Explanation of architectural improvements
+            st.write("---")
+            st.subheader("📚 SPEAR-UNet Architecture Improvements")
+            
+            st.write("""
+            1. **Stochastic Feature Pyramid (SFP)** - Improves multi-scale feature extraction
+            2. **Dynamic Regularization** - Adaptive regularization to prevent overfitting
+            3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
+            """)
+    
+    # Save results section
+    if username and username != "guest":
+        save_col1, save_col2 = st.columns([3, 1])
+        
+        with save_col1:
+            save_note = st.text_input("Add a note about this analysis (optional)", key="enhanced_save_note")
+        
+        with save_col2:
+            save_button = st.button("💾 Save Enhanced Analysis Results", type="primary", key="enhanced_save_button")
+            
+            if save_button:
+                # Prepare a copy of results for saving
+                save_results = results.copy()
+                
+                # Add user's note
+                save_results["user_note"] = save_note
+                
+                # Add analysis type info
+                save_results["analysis_type"] = "enhanced_two_stage"
+                
+                # IMPROVED IMAGE PATH SAVING
+                image_paths = {}
+                
+                # Make sure to save the original image
+                if isinstance(results["original_image"], Image.Image):
+                    # Save original image if it's a PIL Image
+                    original_path = f"results/original_{int(time.time())}.png"
+                    results["original_image"].save(original_path)
+                    image_paths["original"] = original_path
+                    save_results["original_image_path"] = original_path
+                elif "original_image_path" in results:
+                    # Use existing path if available
+                    image_paths["original"] = results["original_image_path"] 
+                
+                # Segmented image
+                if "segmented_image" in results and isinstance(results["segmented_image"], Image.Image):
+                    segmented_path = f"results/segmented_{int(time.time())}.png"
+                    results["segmented_image"].save(segmented_path)
+                    image_paths["segmented"] = segmented_path
+                    save_results["segmented_image_path"] = segmented_path
+                elif "segmented_image_path" in results:
+                    image_paths["segmented"] = results["segmented_image_path"]
+                
+                # Save confidence distribution visualizations
+                for i, (fruit_data, distribution) in enumerate(zip(
+                    results.get("fruits_data", []),
+                    results.get("confidence_distributions", [])
+                )):
+                    if distribution and "error" not in distribution:
+                        viz_path = visualize_confidence_distribution(
+                            fruit_data, distribution, fruit_type, 
+                            save_path=f"results/fruit_{i+1}_dist_{int(time.time())}.png"
+                        )
+                        image_paths[f"fruit_{i+1}_distribution"] = viz_path
+                
+                # Save all fruits visualization if multiple fruits
+                if num_fruits > 1:
+                    all_viz_path = visualize_all_fruits_confidence(
+                        results, 
+                        save_path=f"results/all_fruits_dist_{int(time.time())}.png"
+                    )
+                    image_paths["all_fruits_distribution"] = all_viz_path
+                
+                # Save the results
+                result_id = save_user_result(username, save_results, image_paths)
+                
+                st.success(f"✅ Enhanced analysis results saved successfully! (ID: {result_id})")
+                
+                # Add button to view history
+                if st.button("View Saved Results", key="enhanced_view_history"):
+                    st.session_state.page = "history"
+                    st.rerun()
+    else:
+        st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
 def display_patch_based_results(combined_results, system, use_segmentation, username):
     """Display results for patch-based analysis"""
@@ -629,6 +1055,234 @@ def display_patch_based_results(combined_results, system, use_segmentation, user
                 
                 # Add button to view history
                 if st.button("View Saved Results"):
+                    st.session_state.page = "history"
+                    st.rerun()
+    else:
+        st.info("💡 Log in with a user account to save your analysis results for future reference.")
+
+def display_enhanced_patch_based_results(combined_results, system, username):
+    """Display patch-based analysis results with enhanced confidence distributions"""
+    if "error" in combined_results and "angle_results" not in combined_results:
+        st.error(f"Error: {combined_results['error']}")
+        return
+    
+    fruit_type = combined_results.get("fruit_type", "Unknown")
+    num_angles = combined_results.get("num_angles", 0)
+    
+    st.subheader("📊 Enhanced Patch-Based Analysis")
+    st.info(f"Analyzed {num_angles} angles of the {fruit_type} with detailed confidence distributions")
+    
+    st.subheader("🍌 Combined Ripeness Analysis")
+    
+    # Create tabs for each angle
+    angle_tabs = st.tabs(combined_results["angle_names"])
+    
+    # Process each angle
+    for i, (tab, angle_result) in enumerate(zip(angle_tabs, combined_results["angle_results"])):
+        with tab:
+            angle_name = combined_results["angle_names"][i]
+            
+            st.write(f"## {angle_name} View Analysis")
+            
+            # Display original and segmented images
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Original {angle_name} View**")
+                st.image(angle_result["original_image"], use_container_width=True)
+            
+            with col2:
+                st.write(f"**Segmented {angle_name} View**")
+                st.image(angle_result["segmented_image"], use_container_width=True)
+            
+            # Display confidence distributions for fruits in this angle
+            if "fruits_data" in angle_result and "confidence_distributions" in angle_result:
+                fruits_data = angle_result["fruits_data"]
+                confidence_distributions = angle_result["confidence_distributions"]
+                
+                if len(fruits_data) > 1:
+                    # Multiple fruits in this angle
+                    st.write(f"**{len(fruits_data)} fruits detected in {angle_name} view**")
+                    
+                    # Create fruit tabs
+                    fruit_tabs = st.tabs([f"Fruit #{j+1}" for j in range(len(fruits_data))])
+                    
+                    for j, (fruit_tab, fruit_data, distribution) in enumerate(zip(
+                        fruit_tabs, fruits_data, confidence_distributions
+                    )):
+                        with fruit_tab:
+                            if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
+                                st.write(f"**Fruit #{j+1}**")
+                                fruit_img = Image.open(fruit_data["masked_crop_path"])
+                                st.image(fruit_img, width=300)
+                            
+                            # Display confidence distribution
+                            if distribution and "error" not in distribution:
+                                viz_path = visualize_confidence_distribution(
+                                    fruit_data, distribution, fruit_type
+                                )
+                                viz_img = Image.open(viz_path)
+                                st.image(viz_img, use_container_width=True)
+                            else:
+                                st.warning("No confidence distribution available for this fruit")
+                else:
+                    # Single fruit in this angle
+                    fruit_data = fruits_data[0]
+                    distribution = confidence_distributions[0]
+                    
+                    if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
+                        st.write("**Processed Fruit**")
+                        fruit_img = Image.open(fruit_data["masked_crop_path"])
+                        st.image(fruit_img, width=300)
+                    
+                    # Display confidence distribution
+                    if distribution and "error" not in distribution:
+                        viz_path = visualize_confidence_distribution(
+                            fruit_data, distribution, fruit_type
+                        )
+                        viz_img = Image.open(viz_path)
+                        st.image(viz_img, use_container_width=True)
+                        
+                        # Add download link
+                        st.markdown(
+                            get_image_download_link(
+                                viz_img,
+                                f"{angle_name}_ripeness.png",
+                                f"Download {angle_name} Visualization"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.warning("No confidence distribution available for this angle")
+            else:
+                st.warning(f"No fruit data available for {angle_name} view")
+    
+    # Comparison across angles
+    st.subheader("📈 Cross-Angle Comparison")
+    
+    # Collect all unique ripeness levels across all angles
+    all_ripeness_levels = set()
+    for angle_result in combined_results["angle_results"]:
+        if "confidence_distributions" in angle_result:
+            for distribution in angle_result["confidence_distributions"]:
+                if distribution and "error" not in distribution:
+                    for level in distribution.keys():
+                        if level not in ["error", "estimated"]:
+                            all_ripeness_levels.add(level)
+    
+    if all_ripeness_levels:
+        ripeness_levels = sorted(list(all_ripeness_levels))
+        angle_names = combined_results["angle_names"]
+        
+        # Create comparison chart
+        comparison_data = []
+        
+        for angle_idx, angle_result in enumerate(combined_results["angle_results"]):
+            if "confidence_distributions" not in angle_result:
+                continue
+                
+            # Get first fruit from each angle for comparison
+            if angle_result["confidence_distributions"]:
+                distribution = angle_result["confidence_distributions"][0]
+                if distribution and "error" not in distribution:
+                    angle_data = {"angle": angle_names[angle_idx]}
+                    
+                    for level in ripeness_levels:
+                        angle_data[level] = distribution.get(level, 0)
+                    
+                    comparison_data.append(angle_data)
+        
+        if comparison_data:
+            # Create bar chart
+            fig, ax = plt.subplots(figsize=(12, 6))
+            bar_width = 0.15
+            index = np.arange(len(ripeness_levels))
+            
+            for i, data in enumerate(comparison_data):
+                values = [data.get(level, 0) * 100 for level in ripeness_levels]
+                ax.bar(index + i*bar_width, values, bar_width, label=data["angle"])
+            
+            ax.set_xlabel('Ripeness Level')
+            ax.set_ylabel('Confidence (%)')
+            ax.set_title('Ripeness Confidence by Angle')
+            ax.set_xticks(index + bar_width * (len(comparison_data) - 1) / 2)
+            ax.set_xticklabels(ripeness_levels)
+            ax.set_ylim([0, 100])
+            ax.legend()
+            
+            st.pyplot(fig)
+            
+            # Add table with values
+            st.write("**Confidence Values by Angle (%)**")
+            table_data = {"Ripeness Level": ripeness_levels}
+            
+            for data in comparison_data:
+                angle_name = data["angle"]
+                table_data[angle_name] = [f"{data.get(level, 0)*100:.1f}%" for level in ripeness_levels]
+            
+            st.table(table_data)
+        else:
+            st.warning("Insufficient data for comparison")
+    else:
+        st.warning("No comparable ripeness levels found across angles")
+    
+    # Save the results
+    st.subheader("Save Results")
+    
+    if username and username != "guest":
+        save_col1, save_col2 = st.columns([3, 1])
+        
+        with save_col1:
+            save_note = st.text_input("Add a note about this enhanced multi-angle analysis (optional)", 
+                                    key="enhanced_patch_note")
+        
+        with save_col2:
+            save_button = st.button("💾 Save Enhanced Multi-Angle Results", 
+                                  type="primary", 
+                                  key="enhanced_patch_save")
+            
+            if save_button:
+                # Prepare results for saving
+                save_results = combined_results.copy()
+                save_results["user_note"] = save_note
+                save_results["analysis_type"] = "enhanced_patch_based"
+                
+                # Save images
+                image_paths = {}
+                
+                # Save visualization images from each angle
+                for i, angle_result in enumerate(combined_results["angle_results"]):
+                    angle_name = combined_results["angle_names"][i]
+                    
+                    # Save confidence visualizations
+                    if "confidence_distributions" in angle_result:
+                        for j, (fruit_data, distribution) in enumerate(zip(
+                            angle_result.get("fruits_data", []),
+                            angle_result["confidence_distributions"]
+                        )):
+                            if distribution and "error" not in distribution:
+                                viz_path = visualize_confidence_distribution(
+                                    fruit_data, 
+                                    distribution, 
+                                    fruit_type,
+                                    save_path=f"results/{angle_name}_fruit{j}_{int(time.time())}.png"
+                                )
+                                image_paths[f"{angle_name}_fruit{j}_distribution"] = viz_path
+                    
+                    # Save original and segmented images from first angle
+                    if i == 0:
+                        if "original_image_path" in angle_result:
+                            image_paths["original"] = angle_result["original_image_path"]
+                        
+                        if "segmented_image_path" in angle_result:
+                            image_paths["segmented"] = angle_result["segmented_image_path"]
+                
+                # Save the results
+                result_id = save_user_result(username, save_results, image_paths)
+                
+                st.success(f"✅ Enhanced multi-angle analysis results saved successfully! (ID: {result_id})")
+                
+                # Add button to view history
+                if st.button("View Saved Results", key="enhanced_patch_history"):
                     st.session_state.page = "history"
                     st.rerun()
     else:
@@ -845,6 +1499,10 @@ def main():
                 use_segmentation = st.checkbox("Use Segmentation", value=True, 
                                             help="Segment the fruit from the background before analysis. Disable this to send the original image directly to the ripeness detector.")
                 
+                # ADD ENHANCED ANALYSIS OPTION
+                use_enhanced_analysis = st.checkbox("Use Enhanced Two-Stage Analysis", value=True,
+                                                help="Use the two-stage analysis approach with detailed confidence distributions")
+                
                 if use_segmentation:
                     refine_segmentation = st.checkbox("Refine Segmentation Mask", value=True, 
                                                 help="Apply post-processing to improve the segmentation mask")
@@ -862,6 +1520,7 @@ def main():
                 st.session_state.use_segmentation = use_segmentation
                 st.session_state.refine_segmentation = refine_segmentation
                 st.session_state.refinement_method = refinement_method
+                st.session_state.use_enhanced_analysis = use_enhanced_analysis
             
             if analysis_type == "Single Image":
                 st.write("### Upload Your Image")
@@ -1010,17 +1669,35 @@ def main():
             username = get_current_user()
             
             if st.session_state.uploaded_file is not None or st.session_state.camera_image is not None:
+                # Single image analysis
                 image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
                 
                 if image_input is not None:
                     use_segmentation = st.session_state.use_segmentation
                     refine_segmentation = st.session_state.refine_segmentation
                     refinement_method = st.session_state.refinement_method
+                    use_enhanced_analysis = st.session_state.use_enhanced_analysis
                     
                     progress_bar = st.progress(0)
                     status_text = st.empty()
-
-                    if use_segmentation:
+                    
+                    if use_enhanced_analysis:
+                        # Use the enhanced two-stage approach
+                        status_text.text(f"Processing {st.session_state.selected_fruit} using two-stage analysis...")
+                        progress_bar.progress(25)
+                        
+                        # Call the enhanced analysis method
+                        results = system.analyze_ripeness_enhanced(
+                            image_input,
+                            fruit_type=st.session_state.selected_fruit.lower()
+                        )
+                        
+                        progress_bar.progress(100)
+                        status_text.text("Enhanced analysis complete!")
+                        
+                        # Use the enhanced display function
+                        display_enhanced_results(results, system, username)
+                    elif use_segmentation:
                         status_text.text(f"Processing {st.session_state.selected_fruit} image with segmentation...")
                         progress_bar.progress(25)
                         
@@ -1031,6 +1708,10 @@ def main():
                             refinement_method=refinement_method
                         )
                         
+                        progress_bar.progress(100)
+                        status_text.text("Processing complete!")
+                        
+                        display_results(results, system, use_segmentation, username)
                     else:
                         status_text.text(f"Processing {st.session_state.selected_fruit} image without segmentation...")
                         progress_bar.progress(25)
@@ -1039,13 +1720,14 @@ def main():
                             image_input,
                             fruit_type=st.session_state.selected_fruit.lower()
                         )
-                    
-                    progress_bar.progress(100)
-                    status_text.text("Processing complete!")
-                    
-                    display_results(results, system, use_segmentation, username)
+                        
+                        progress_bar.progress(100)
+                        status_text.text("Processing complete!")
+                        
+                        display_results(results, system, use_segmentation, username)
                     
             elif st.session_state.start_analysis and "front_file" in st.session_state and "back_file" in st.session_state:
+                # Multi-angle (patch-based) analysis
                 front_file = st.session_state.front_file
                 back_file = st.session_state.back_file
                 top_file = st.session_state.top_file if "top_file" in st.session_state else None
@@ -1054,21 +1736,23 @@ def main():
                 use_segmentation = st.session_state.use_segmentation
                 refine_segmentation = st.session_state.refine_segmentation
                 refinement_method = st.session_state.refinement_method
+                use_enhanced_analysis = st.session_state.use_enhanced_analysis
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
                 status_text.text(f"Processing {st.session_state.selected_fruit} from multiple angles...")
                 
+                # Process each angle
                 results_front = process_angle_image(
                     system, front_file, st.session_state.selected_fruit.lower(), "Front", 
-                    use_segmentation, refine_segmentation, refinement_method
+                    use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis
                 )
                 progress_bar.progress(25)
                 
                 results_back = process_angle_image(
                     system, back_file, st.session_state.selected_fruit.lower(), "Back", 
-                    use_segmentation, refine_segmentation, refinement_method
+                    use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis
                 )
                 progress_bar.progress(50)
                 
@@ -1078,14 +1762,14 @@ def main():
                 if st.session_state.show_top and top_file is not None:
                     results_top = process_angle_image(
                         system, top_file, st.session_state.selected_fruit.lower(), "Top", 
-                        use_segmentation, refine_segmentation, refinement_method
+                        use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis
                     )
                     progress_bar.progress(75)
                 
                 if st.session_state.show_bottom and bottom_file is not None:
                     results_bottom = process_angle_image(
                         system, bottom_file, st.session_state.selected_fruit.lower(), "Bottom", 
-                        use_segmentation, refine_segmentation, refinement_method
+                        use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis
                     )
                     progress_bar.progress(90)
                 
@@ -1095,7 +1779,10 @@ def main():
                 progress_bar.progress(100)
                 status_text.text("Processing complete!")
 
-                display_patch_based_results(combined_results, system, use_segmentation, username)
+                if use_enhanced_analysis:
+                    display_enhanced_patch_based_results(combined_results, system, username)
+                else:
+                    display_patch_based_results(combined_results, system, use_segmentation, username)
             else:
                 st.error("No image data found. Please go back and upload images.")
 
