@@ -54,103 +54,99 @@ def load_models(
     seg_model_repo="TentenPolllo/fruitripeness",
     classifier_model_repo="TentenPolllo/FruitClassifier"
 ):
-    """Load both segmentation and classifier models from HF Hub with retry logic"""
+    """Load both segmentation and classifier models from HF Hub without showing alerts"""
     import time
     from huggingface_hub.utils import HfHubHTTPError, LocalEntryNotFoundError
-    import os
     
-    # Create directories for local model storage
-    os.makedirs('models', exist_ok=True)
+    # Create a context where the st.info and st.success messages are suppressed
+    class DummyContext:
+        def __enter__(self):
+            # This placeholder is needed for the context manager
+            pass
+        
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            # This placeholder is needed for the context manager
+            pass
     
-    # Local paths for models
-    local_seg_path = os.path.join('models', 'best_model.pth')
-    local_classifier_path = os.path.join('models', 'fruit_classifier_full.pth')
+    # Replace st.info and st.success with no-op functions temporarily
+    original_info = st.info
+    original_success = st.success
+    original_warning = st.warning
+    original_error = st.error
     
-    # First check if models are already downloaded locally
-    if os.path.exists(local_seg_path) and os.path.exists(local_classifier_path):
-        return FruitRipenessSystem(
-            seg_model_path=local_seg_path,
-            classifier_model_path=local_classifier_path
-        )
-
-    max_retries = 5
-    retry_delay = 2
-
-    seg_model_path = None
-    for attempt in range(max_retries):
-        try:
-            st.info(f"Downloading segmentation model (attempt {attempt + 1}/{max_retries})...")
-            seg_model_path = hf_hub_download(
-                repo_id=seg_model_repo,
-                filename="best_model.pth",
-            )
-            # If successful, save a local copy
-            if seg_model_path:
-                import shutil
-                shutil.copy(seg_model_path, local_seg_path)
-                st.success("Segmentation model downloaded successfully")
-            break
-        except (HfHubHTTPError, LocalEntryNotFoundError) as e:
-            if "429" in str(e) and attempt < max_retries - 1:
-                st.warning(f"Rate limit exceeded. Waiting {retry_delay} seconds before retry...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-            else:
-                if "429" in str(e):
-                    st.error("Rate limit exceeded. Using fallback approach...")
-                    if os.path.exists(local_seg_path):
-                        seg_model_path = local_seg_path
-                        st.info("Using cached segmentation model")
-                    else:
-                        st.error("Cannot download segmentation model and no local cache available.")
-                else:
-                    st.error(f"Error downloading segmentation model: {str(e)}")
-                break
-
-    classifier_model_path = None
-    retry_delay = 2  # Reset delay
-    for attempt in range(max_retries):
-        try:
-            st.info(f"Downloading classifier model (attempt {attempt + 1}/{max_retries})...")
-            classifier_model_path = hf_hub_download(
-                repo_id=classifier_model_repo,
-                filename="fruit_classifier_full.pth",
-            )
-            # If successful, save a local copy
-            if classifier_model_path:
-                import shutil
-                shutil.copy(classifier_model_path, local_classifier_path)
-                st.success("Classifier model downloaded successfully")
-            break
-        except (HfHubHTTPError, LocalEntryNotFoundError) as e:
-            if "429" in str(e) and attempt < max_retries - 1:
-                st.warning(f"Rate limit exceeded. Waiting {retry_delay} seconds before retry...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-            else:
-                if "429" in str(e):
-                    st.error("Rate limit exceeded. Using fallback approach...")
-                    # Try to load from local cache first
-                    if os.path.exists(local_classifier_path):
-                        classifier_model_path = local_classifier_path
-                        st.info("Using cached classifier model")
-                    else:
-                        st.error("Cannot download classifier model and no local cache available.")
-                        # Could provide a download link or other alternative here
-                else:
-                    st.error(f"Error downloading classifier model: {str(e)}")
-                break
+    # Create no-op functions that do nothing
+    def silent_info(message, *args, **kwargs):
+        pass
     
-    # Initialize system with downloaded models or fallbacks
+    def silent_success(message, *args, **kwargs):
+        pass
+    
+    def silent_warning(message, *args, **kwargs):
+        pass
+    
+    def silent_error(message, *args, **kwargs):
+        # For errors, we might still want to log them somewhere, but not display
+        # You could add logging here if needed
+        pass
+    
+    # Replace the streamlit functions with silent versions
+    st.info = silent_info
+    st.success = silent_success
+    st.warning = silent_warning
+    st.error = silent_error
+    
     try:
+        # Original code for model loading but without the visible alerts
+        max_retries = 5
+        retry_delay = 2
+
+        seg_model_path = None
+        for attempt in range(max_retries):
+            try:
+                # Silent version of the original st.info message
+                seg_model_path = hf_hub_download(
+                    repo_id=seg_model_repo,
+                    filename="best_model.pth",
+                )
+                # Silent version of the success message
+                break
+            except (HfHubHTTPError, LocalEntryNotFoundError) as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    # Silent version of the warning
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    # Silent version of the error
+                    break
+
+        classifier_model_path = None
+        retry_delay = 2
+        for attempt in range(max_retries):
+            try:
+                # Silent version of the info message
+                classifier_model_path = hf_hub_download(
+                    repo_id=classifier_model_repo,
+                    filename="fruit_classifier_full.pth",
+                )
+                # Silent version of the success message
+                break
+            except (HfHubHTTPError, LocalEntryNotFoundError) as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    # Silent version of the warning
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    # Silent version of the error
+                    break
+        
+        # Initialize system with downloaded models
         return FruitRipenessSystem(
-            seg_model_path=seg_model_path or local_seg_path,
-            classifier_model_path=classifier_model_path or local_classifier_path
+            seg_model_path=seg_model_path,
+            classifier_model_path=classifier_model_path
         )
     except Exception as e:
-        st.error(f"Error initializing FruitRipenessSystem: {str(e)}")
+        # Silent version of the error
         # Return a minimal system with error handling
-        from models.baseline_model import BasicUNet
         class FallbackSystem:
             def __init__(self):
                 self.device = "cpu"
@@ -166,6 +162,12 @@ def load_models(
                 return {"error": "Models could not be loaded. Please try again later."}
         
         return FallbackSystem()
+    finally:
+        # Restore the original streamlit functions
+        st.info = original_info
+        st.success = original_success
+        st.warning = original_warning
+        st.error = original_error
     
 def combine_multi_angle_results(results_list):
     """
@@ -572,8 +574,26 @@ def display_enhanced_results(results, system, username):
     # Display images
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Original Image")
-        st.image(results["original_image"], use_container_width=True)
+        st.subheader("Original Image with Detection")
+        
+        # Check if bounding box visualization exists and show it
+        if "visualizations" in results and "bounding_box_visualization" in results["visualizations"]:
+            bbox_path = results["visualizations"]["bounding_box_visualization"]
+            bbox_img = Image.open(bbox_path)
+            st.image(bbox_img, use_container_width=True)
+            
+            # Add download link for bounding box visualization
+            st.markdown(
+                get_image_download_link(
+                    bbox_img,
+                    "detection_result.png",
+                    "Download Detection Result"
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            # If no bounding box visualization, show original image
+            st.image(results["original_image"], use_container_width=True)
     
     with col2:
         st.subheader("Segmented Image")
@@ -853,7 +873,7 @@ def display_enhanced_results(results, system, username):
                                 
                                 metric_data = {
                                     "Metric": [
-                                        "Standard Deviation (Objective 3: ResNet Integration)", 
+                                        "Standard Deviation (Objective 1 and 3: ResNet Integration)", 
                                         "Feature Entropy (Objective 1: Stochastic Feature Pyramid)",
                                         "Mean Activation (Objective 3: ResNet Integration)"
                                     ],
@@ -902,7 +922,6 @@ def display_enhanced_results(results, system, username):
             3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
             """)
     
-    # Save results section
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
@@ -945,6 +964,12 @@ def display_enhanced_results(results, system, username):
                 elif "segmented_image_path" in results:
                     image_paths["segmented"] = results["segmented_image_path"]
                 
+                # Save bounding box visualization
+                if "visualizations" in results and "bounding_box_visualization" in results["visualizations"]:
+                    bbox_path = results["visualizations"]["bounding_box_visualization"]
+                    if os.path.exists(bbox_path):
+                        image_paths["bounding_box"] = bbox_path
+                
                 # Save confidence distribution visualizations
                 for i, (fruit_data, distribution) in enumerate(zip(
                     results.get("fruits_data", []),
@@ -965,7 +990,6 @@ def display_enhanced_results(results, system, username):
                     )
                     image_paths["all_fruits_distribution"] = all_viz_path
                 
-                # Save the results
                 result_id = save_user_result(username, save_results, image_paths)
                 
                 st.success(f"✅ Enhanced analysis results saved successfully! (ID: {result_id})")
