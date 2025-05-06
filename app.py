@@ -68,7 +68,6 @@ def load_models(
     
     # First check if models are already downloaded locally
     if os.path.exists(local_seg_path) and os.path.exists(local_classifier_path):
-        st.success("Using locally cached models")
         return FruitRipenessSystem(
             seg_model_path=local_seg_path,
             classifier_model_path=local_classifier_path
