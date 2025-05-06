@@ -437,21 +437,25 @@ def display_results(results, system, use_segmentation, username):
                                     layer_metric = comparison["layer_metrics"][layer_name]
                                     
                                     metric_data = {
-                                        "Metric": ["Standard Deviation", "Feature Entropy", "Mean Activation",],
+                                        "Metric": [
+                                            "Standard Deviation (Objective 3: ResNet Integration)", 
+                                            "Feature Entropy (Objective 1: Stochastic Feature Pyramid)",
+                                            "Mean Activation (Objective 3: ResNet Integration)"
+                                        ],
                                         "Base U-Net": [
                                             f"{layer_metric['baseline']['std_activation']:.4f}",
                                             f"{layer_metric['baseline']['entropy']:.4f}",
-                                            f"{layer_metric['baseline']['mean_activation']:.4f}",
+                                            f"{layer_metric['baseline']['mean_activation']:.4f}"
                                         ],
                                         "SPEAR-UNet": [
                                             f"{layer_metric['enhanced']['std_activation']:.4f}",
                                             f"{layer_metric['enhanced']['entropy']:.4f}",
-                                                                                        f"{layer_metric['enhanced']['mean_activation']:.4f}",
+                                            f"{layer_metric['enhanced']['mean_activation']:.4f}"
                                         ],
                                         "Improvement": [
                                             f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
                                             f"{layer_metric['entropy_improvement']:.1f}%",
-                                            f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
+                                            f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%"
                                         ]
                                     }
                                     
@@ -844,26 +848,29 @@ def display_enhanced_results(results, system, username):
                             st.write(f"**{key} Layer Comparison:**")
                             st.image(visualizations[key], use_container_width=True)
                             
-                            # Add metrics table for this layer if available
                             if comparison and "layer_metrics" in comparison and key in comparison["layer_metrics"]:
                                 layer_metric = comparison["layer_metrics"][key]
                                 
                                 metric_data = {
-                                    "Metric": ["Mean Activation", "Standard Deviation", "Feature Entropy"],
+                                    "Metric": [
+                                        "Standard Deviation (Objective 3: ResNet Integration)", 
+                                        "Feature Entropy (Objective 1: Stochastic Feature Pyramid)",
+                                        "Mean Activation (Objective 3: ResNet Integration)"
+                                    ],
                                     "Base U-Net": [
-                                        f"{layer_metric['baseline']['mean_activation']:.4f}",
                                         f"{layer_metric['baseline']['std_activation']:.4f}",
-                                        f"{layer_metric['baseline']['entropy']:.4f}"
+                                        f"{layer_metric['baseline']['entropy']:.4f}",
+                                        f"{layer_metric['baseline']['mean_activation']:.4f}"
                                     ],
                                     "SPEAR-UNet": [
-                                        f"{layer_metric['enhanced']['mean_activation']:.4f}",
                                         f"{layer_metric['enhanced']['std_activation']:.4f}",
-                                        f"{layer_metric['enhanced']['entropy']:.4f}"
+                                        f"{layer_metric['enhanced']['entropy']:.4f}",
+                                        f"{layer_metric['enhanced']['mean_activation']:.4f}"
                                     ],
                                     "Improvement": [
-                                        f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%",
                                         f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
-                                        f"{layer_metric['entropy_improvement']:.1f}%"
+                                        f"{layer_metric['entropy_improvement']:.1f}%",
+                                        f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%"
                                     ]
                                 }
                                 
