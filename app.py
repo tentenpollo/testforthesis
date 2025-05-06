@@ -52,25 +52,126 @@ os.makedirs('results', exist_ok=True)
 @st.cache_resource
 def load_models(
     seg_model_repo="TentenPolllo/fruitripeness",
-    classifier_model_repo="TentenPolllo/FruitClassifier"  # Updated to your new repo
+    classifier_model_repo="TentenPolllo/FruitClassifier"
 ):
-    """Load both segmentation and classifier models from HF Hub"""
-    # Load segmentation model from Hugging Face
-    seg_model_path = hf_hub_download(
-        repo_id=seg_model_repo,
-        filename="best_model.pth",
-    )
+    """Load both segmentation and classifier models from HF Hub with retry logic"""
+    import time
+    from huggingface_hub.utils import HfHubHTTPError, LocalEntryNotFoundError
+    import os
     
-    # Load classifier model from the new repository
-    classifier_model_path = hf_hub_download(
-        repo_id=classifier_model_repo,
-        filename="fruit_classifier_full.pth",
-    )
+    # Create directories for local model storage
+    os.makedirs('models', exist_ok=True)
     
-    return FruitRipenessSystem(
-        seg_model_path=seg_model_path,
-        classifier_model_path=classifier_model_path
-    )
+    # Local paths for models
+    local_seg_path = os.path.join('models', 'best_model.pth')
+    local_classifier_path = os.path.join('models', 'fruit_classifier_full.pth')
+    
+    # First check if models are already downloaded locally
+    if os.path.exists(local_seg_path) and os.path.exists(local_classifier_path):
+        st.success("Using locally cached models")
+        return FruitRipenessSystem(
+            seg_model_path=local_seg_path,
+            classifier_model_path=local_classifier_path
+        )
+    
+    # If not, try to download with retry logic
+    max_retries = 5
+    retry_delay = 2  # Start with 2 second delay
+    
+    # Try to download segmentation model
+    seg_model_path = None
+    for attempt in range(max_retries):
+        try:
+            st.info(f"Downloading segmentation model (attempt {attempt + 1}/{max_retries})...")
+            seg_model_path = hf_hub_download(
+                repo_id=seg_model_repo,
+                filename="best_model.pth",
+            )
+            # If successful, save a local copy
+            if seg_model_path:
+                import shutil
+                shutil.copy(seg_model_path, local_seg_path)
+                st.success("Segmentation model downloaded successfully")
+            break
+        except (HfHubHTTPError, LocalEntryNotFoundError) as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                st.warning(f"Rate limit exceeded. Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                if "429" in str(e):
+                    st.error("Rate limit exceeded. Using fallback approach...")
+                    # Try to load from local cache first
+                    if os.path.exists(local_seg_path):
+                        seg_model_path = local_seg_path
+                        st.info("Using cached segmentation model")
+                    else:
+                        st.error("Cannot download segmentation model and no local cache available.")
+                        # Could provide a download link or other alternative here
+                else:
+                    st.error(f"Error downloading segmentation model: {str(e)}")
+                break
+    
+    # Try to download classifier model
+    classifier_model_path = None
+    retry_delay = 2  # Reset delay
+    for attempt in range(max_retries):
+        try:
+            st.info(f"Downloading classifier model (attempt {attempt + 1}/{max_retries})...")
+            classifier_model_path = hf_hub_download(
+                repo_id=classifier_model_repo,
+                filename="fruit_classifier_full.pth",
+            )
+            # If successful, save a local copy
+            if classifier_model_path:
+                import shutil
+                shutil.copy(classifier_model_path, local_classifier_path)
+                st.success("Classifier model downloaded successfully")
+            break
+        except (HfHubHTTPError, LocalEntryNotFoundError) as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                st.warning(f"Rate limit exceeded. Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                if "429" in str(e):
+                    st.error("Rate limit exceeded. Using fallback approach...")
+                    # Try to load from local cache first
+                    if os.path.exists(local_classifier_path):
+                        classifier_model_path = local_classifier_path
+                        st.info("Using cached classifier model")
+                    else:
+                        st.error("Cannot download classifier model and no local cache available.")
+                        # Could provide a download link or other alternative here
+                else:
+                    st.error(f"Error downloading classifier model: {str(e)}")
+                break
+    
+    # Initialize system with downloaded models or fallbacks
+    try:
+        return FruitRipenessSystem(
+            seg_model_path=seg_model_path or local_seg_path,
+            classifier_model_path=classifier_model_path or local_classifier_path
+        )
+    except Exception as e:
+        st.error(f"Error initializing FruitRipenessSystem: {str(e)}")
+        # Return a minimal system with error handling
+        from models.baseline_model import BasicUNet
+        class FallbackSystem:
+            def __init__(self):
+                self.device = "cpu"
+                self.supported_fruits = ["banana", "tomato", "pineapple", "strawberry", "mango"]
+                
+            def process_image_with_visualization(self, *args, **kwargs):
+                return {"error": "Models could not be loaded. Please try again later."}
+                
+            def process_image_without_segmentation(self, *args, **kwargs):
+                return {"error": "Models could not be loaded. Please try again later."}
+                
+            def analyze_ripeness_enhanced(self, *args, **kwargs):
+                return {"error": "Models could not be loaded. Please try again later."}
+        
+        return FallbackSystem()
     
 def combine_multi_angle_results(results_list):
     """
