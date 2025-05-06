@@ -31,11 +31,9 @@ class CustomModelInference:
             "normalize_std": [0.229, 0.224, 0.225],
             "model_arch": "convnext_tiny",
             "num_classes": 3,  # Unripe, Ripe, Overripe
-            "class_names": ["Unripe", "Ripe", "Overripe"]  # These will be loaded from the model file
+            "class_names": ["Unripe", "Ripe", "Overripe"]
         }
         
-        # Add configurations for other fruit models as they become available
-        # Example for future pineapple model
         self.model_configs["pineapple"] = {
             "repo_id": "TentenPolllo/pineappleripeness",  # Placeholder - update when available
             "filename": "best_pineapple_model.pth",       # Placeholder - update when available
