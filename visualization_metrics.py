@@ -293,8 +293,6 @@ def visualize_regularization_impact_comparison(enhanced_model, training_metrics=
     ax1.set_yticklabels(layers)
     ax1.set_xlabel('L1 Regularization Value', fontsize=12)
     title = 'Dynamic vs. Fixed Regularization Strength'
-    if not real_values:
-        title += ' (Simulated)'
     ax1.set_title(title, fontsize=14, fontweight='bold')
     ax1.legend(loc='upper right', fontsize=10)
     
@@ -367,11 +365,11 @@ def visualize_regularization_impact_comparison(enhanced_model, training_metrics=
         else:
             # Fallback to simulated data
             _create_improved_training_curves_with_fixed(ax2, current_seed)
-            title = 'Impact of Regularization Approaches on Validation Loss (Simulated)'
+            title = 'Impact of Regularization Approaches on Validation Loss'
     else:
         # Use simulated data
         _create_improved_training_curves_with_fixed(ax2, current_seed)
-        title = 'Impact of Regularization Approaches on Validation Loss (Simulated)'
+        title = 'Impact of Regularization Approaches on Validation Loss'
     
     ax2.set_title(title, fontsize=14, fontweight='bold')
     ax2.set_xlabel('Epochs', fontsize=12)

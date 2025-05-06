@@ -72,12 +72,10 @@ def load_models(
             seg_model_path=local_seg_path,
             classifier_model_path=local_classifier_path
         )
-    
-    # If not, try to download with retry logic
+
     max_retries = 5
-    retry_delay = 2  # Start with 2 second delay
-    
-    # Try to download segmentation model
+    retry_delay = 2
+
     seg_model_path = None
     for attempt in range(max_retries):
         try:
@@ -100,18 +98,15 @@ def load_models(
             else:
                 if "429" in str(e):
                     st.error("Rate limit exceeded. Using fallback approach...")
-                    # Try to load from local cache first
                     if os.path.exists(local_seg_path):
                         seg_model_path = local_seg_path
                         st.info("Using cached segmentation model")
                     else:
                         st.error("Cannot download segmentation model and no local cache available.")
-                        # Could provide a download link or other alternative here
                 else:
                     st.error(f"Error downloading segmentation model: {str(e)}")
                 break
-    
-    # Try to download classifier model
+
     classifier_model_path = None
     retry_delay = 2  # Reset delay
     for attempt in range(max_retries):
