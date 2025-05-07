@@ -770,7 +770,6 @@ def display_enhanced_results(results, system, username):
                 st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
         else:
             st.write("**Note:** Segmentation was disabled for this analysis.")
-            st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
             
         # Add model information
         st.write("**Model Processing Information:**")
