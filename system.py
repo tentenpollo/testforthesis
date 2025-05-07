@@ -966,10 +966,10 @@ class FruitRipenessSystem:
             print(f"Error using Roboflow model: {str(e)}")
             return {"predictions": [], "error": str(e)}
         
-    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False):
+    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False, use_segmentation=True):
         """
         Enhanced ripeness analysis flow:
-        1. Initial segmentation to remove background
+        1. Initial segmentation to remove background (if use_segmentation is True)
         2. For patch-based: skip detection and go straight to classification
         3. For non-patch-based: detect objects then classify each
         
@@ -977,6 +977,7 @@ class FruitRipenessSystem:
             image_path_or_file: Path to image or file-like object
             fruit_type: Type of fruit to analyze
             is_patch_based: Whether this is part of patch-based analysis
+            use_segmentation: Whether to use segmentation or not
         """
         try:
             # Open and preprocess the image
@@ -992,17 +993,39 @@ class FruitRipenessSystem:
             # Normalize fruit type
             fruit_type_normalized = fruit_type.lower().strip()
             
-            print(f"Performing initial segmentation...")
-            segmentation_results = self.segment_fruit_with_metrics(
-                image_path_or_file,
-                refine_segmentation=True,
-                refinement_method="all"
-            )
+            # Initialize variables
+            segmentation_results = None
+            segmented_img = None
+            mask = None
             
-            # Store original image and segmentation results
+            if use_segmentation:
+                print(f"Performing initial segmentation...")
+                segmentation_results = self.segment_fruit_with_metrics(
+                    image_path_or_file,
+                    refine_segmentation=True,
+                    refinement_method="all"
+                )
+                
+                # Store segmentation results
+                segmented_img = segmentation_results["segmented_image"]
+                mask = segmentation_results["mask"]
+            else:
+                # Skip segmentation, use original image
+                print(f"Skipping segmentation as requested...")
+                segmented_img = img
+                # Create a dummy mask (just for API compatibility)
+                mask = np.zeros((img.height, img.width), dtype=np.uint8)
+                
+                # Create minimal segmentation results for compatibility
+                segmentation_results = {
+                    "original_image": img,
+                    "segmented_image": img,
+                    "mask": mask,
+                    "mask_metrics": {"num_objects": 0, "coverage_ratio": 0.0, "boundary_complexity": 0.0}
+                }
+            
+            # Store original image
             original_img = segmentation_results["original_image"]
-            segmented_img = segmentation_results["segmented_image"]
-            mask = segmentation_results["mask"]
             
             # For patch-based analysis, skip detection and create a single bounding box
             if is_patch_based:
@@ -1045,12 +1068,30 @@ class FruitRipenessSystem:
                     # If no fruits detected, use fallback approach
                     if not predictions:
                         print("No fruits detected by detection model. Using fallback approach...")
-                        # Use connected components as fallback
-                        num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
-                        num_fruits = num_labels - 1
+                        if use_segmentation:
+                            # Use connected components as fallback when segmentation is on
+                            num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
+                            num_fruits = num_labels - 1
+                            
+                            if num_fruits >= 1:
+                                # Create bounding boxes for each connected component
+                                predictions = []
+                                for label in range(1, num_labels):  # Skip background (0)
+                                    component_mask = (labels == label).astype(np.uint8)
+                                    contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                    if contours:
+                                        x, y, w, h = cv2.boundingRect(contours[0])
+                                        predictions.append({
+                                            "x": x + w/2,
+                                            "y": y + h/2,
+                                            "width": w,
+                                            "height": h,
+                                            "confidence": 0.9,
+                                            "class": fruit_type_normalized
+                                        })
                         
-                        # If still no fruits, create a single bounding box
-                        if num_fruits < 1:
+                        # If still no fruits or segmentation was off, create a single bounding box
+                        if not predictions:
                             img_width, img_height = original_img.size
                             predictions = [{
                                 "x": img_width / 2,
@@ -1060,26 +1101,9 @@ class FruitRipenessSystem:
                                 "confidence": 1.0,
                                 "class": fruit_type_normalized
                             }]
-                        else:
-                            # Create bounding boxes for each connected component
-                            predictions = []
-                            for label in range(1, num_labels):  # Skip background (0)
-                                component_mask = (labels == label).astype(np.uint8)
-                                contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                if contours:
-                                    x, y, w, h = cv2.boundingRect(contours[0])
-                                    predictions.append({
-                                        "x": x + w/2,
-                                        "y": y + h/2,
-                                        "width": w,
-                                        "height": h,
-                                        "confidence": 0.9,
-                                        "class": fruit_type_normalized
-                                    })
                         
-                        # Create synthetic detection_results if we used fallback
-                        if detection_results is None:
-                            detection_results = {"predictions": predictions}
+                        # Create synthetic detection_results
+                        detection_results = {"predictions": predictions}
                 except Exception as e:
                     print(f"Error using Roboflow detection model: {str(e)}")
                     # Fallback: use the whole image
@@ -1137,7 +1161,9 @@ class FruitRipenessSystem:
                 "segmentation_results": segmentation_results,
                 "mask": mask,
                 "raw_results": detection_results,
-                "is_patch_based": is_patch_based  # Add flag for display functions
+                "is_patch_based": is_patch_based,  # Add flag for display functions
+                "use_segmentation": use_segmentation,  # Add flag to indicate if segmentation was used
+                "analysis_type": "enhanced_two_stage"  # Explicitly mark as two-stage analysis
             }
             
             # Create visualizations

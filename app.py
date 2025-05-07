@@ -229,7 +229,8 @@ def process_angle_image(system, image_file, fruit_type, angle_name, use_segmenta
             results = system.analyze_ripeness_enhanced(
                 image_file,
                 fruit_type=fruit_type,
-                is_patch_based=True
+                is_patch_based=True,
+                use_segmentation=use_segmentation  # Pass the user's segmentation preference
             )
             # Add angle name to results
             results["angle_name"] = angle_name
@@ -253,7 +254,7 @@ def process_angle_image(system, image_file, fruit_type, angle_name, use_segmenta
     except Exception as e:
         st.error(f"Error processing {angle_name} image: {str(e)}")
         return None
-
+    
 def display_results(results, system, use_segmentation, username):
     if "error" in results and "original_image" not in results:
         st.error(f"Error: {results['error']}")
@@ -595,6 +596,7 @@ def display_enhanced_results(results, system, username):
         st.error(f"Error: {results['error']}")
         return
     
+    use_segmentation = results.get("use_segmentation", True)
     fruit_type = results.get("fruit_type", "Unknown")
     num_fruits = results.get("num_fruits", 0)
     
@@ -626,18 +628,22 @@ def display_enhanced_results(results, system, username):
             st.image(results["original_image"], use_container_width=True)
     
     with col2:
-        st.subheader("Segmented Image")
-        st.image(results["segmented_image"], use_container_width=True)
-        
-        # Add download link
-        st.markdown(
-            get_image_download_link(
-                results["segmented_image"],
-                "segmented_fruit.png",
-                "Download Segmented Image"
-            ),
-            unsafe_allow_html=True
-        )
+        if use_segmentation:
+            st.subheader("Segmented Image")
+            st.image(results["segmented_image"], use_container_width=True)
+            
+            # Add download link
+            st.markdown(
+                get_image_download_link(
+                    results["segmented_image"],
+                    "segmented_fruit.png",
+                    "Download Segmented Image"
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            st.subheader("Processed Image (No Segmentation)")
+            st.image(results["original_image"], use_container_width=True)
     
     # Handle multiple fruits
     if num_fruits > 1:
@@ -748,24 +754,29 @@ def display_enhanced_results(results, system, username):
     
     # Technical details
     with st.expander("Technical Details"):
-        st.write("**Segmentation Mask:**")
-        st.image(results["mask"] * 255, clamp=True, use_container_width=True)
-        
-        if "segmentation_results" in results and "mask_metrics" in results["segmentation_results"]:
-            st.write("**Mask Quality Metrics:**")
-            metrics = results["segmentation_results"]["mask_metrics"]
-            st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
-            st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
-        elif "mask_metrics" in results:
-            st.write("**Mask Quality Metrics:**")
-            metrics = results["mask_metrics"]
-            st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+        if use_segmentation:
+            st.write("**Segmentation Mask:**")
+            st.image(results["mask"] * 255, clamp=True, use_container_width=True)
+            
+            if "segmentation_results" in results and "mask_metrics" in results["segmentation_results"]:
+                st.write("**Mask Quality Metrics:**")
+                metrics = results["segmentation_results"]["mask_metrics"]
+                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+            elif "mask_metrics" in results:
+                st.write("**Mask Quality Metrics:**")
+                metrics = results["mask_metrics"]
+                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+        else:
+            st.write("**Note:** Segmentation was disabled for this analysis.")
             st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
             
         # Add model information
         st.write("**Model Processing Information:**")
         st.write(f"- Device used: {system.device}")
         st.write(f"- Two-Stage Analysis: Enabled")
+        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
         st.write(f"- Segmentation model input size: 256x256")
         
         # Add information about the classification model if available
@@ -952,8 +963,6 @@ def display_enhanced_results(results, system, username):
             3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
             """)
     
-    st.subheader("Save Results")
-
     st.subheader("Save Results")
 
     if username and username != "guest":
@@ -1216,6 +1225,8 @@ def display_enhanced_patch_based_results(combined_results, system, username):
         st.error(f"Error: {combined_results['error']}")
         return
     
+    use_segmentation = combined_results.get("use_segmentation", True)
+                                            
     fruit_type = combined_results.get("fruit_type", "Unknown")
     num_angles = combined_results.get("num_angles", 0)
     
@@ -1232,10 +1243,23 @@ def display_enhanced_patch_based_results(combined_results, system, username):
             st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
     
     with col2:
-        st.subheader("Segmented Image (Front View)")
-        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
-            st.image(combined_results["angle_results"][0]["segmented_image"], use_container_width=True)
-    
+        if use_segmentation:
+            st.subheader("Segmented Image (Front View)")
+            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                st.image(combined_results["angle_results"][0]["segmented_image"], use_container_width=True)
+        else:
+            st.subheader("Processed Image (No Segmentation)")
+            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                if "visualizations" in combined_results["angle_results"][0] and "bounding_box_visualization" in combined_results["angle_results"][0]["visualizations"]:
+                    bbox_path = combined_results["angle_results"][0]["visualizations"]["bounding_box_visualization"]
+                    try:
+                        bbox_img = Image.open(bbox_path)
+                        st.image(bbox_img, use_container_width=True)
+                    except:
+                        st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
+                else:
+                    st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
+        
     # Combined ripeness analysis
     st.subheader("Combined Ripeness Analysis")
     
@@ -1267,8 +1291,20 @@ def display_enhanced_patch_based_results(combined_results, system, username):
                 st.image(angle_result["original_image"], use_container_width=True)
             
             with angle_col2:
-                st.subheader(f"Segmented {angle_name}")
-                st.image(angle_result["segmented_image"], use_container_width=True)
+                if use_segmentation:
+                    st.subheader(f"Segmented {angle_name}")
+                    st.image(angle_result["segmented_image"], use_container_width=True)
+                else:
+                    st.subheader(f"Processed {angle_name}")
+                    if "visualizations" in angle_result and "bounding_box_visualization" in angle_result["visualizations"]:
+                        bbox_path = angle_result["visualizations"]["bounding_box_visualization"]
+                        try:
+                            bbox_img = Image.open(bbox_path)
+                            st.image(bbox_img, use_container_width=True)
+                        except:
+                            st.image(angle_result["original_image"], use_container_width=True)
+                    else:
+                        st.image(angle_result["original_image"], use_container_width=True)
             
             # Display confidence distributions for this angle
             if "confidence_distributions" in angle_result:
@@ -1300,9 +1336,8 @@ def display_enhanced_patch_based_results(combined_results, system, username):
                         viz_img = Image.open(viz_path)
                         st.image(viz_img, use_container_width=True)
     
-    # Technical details - similar to display_enhanced_results
     with st.expander("Technical Details"):
-        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+        if use_segmentation and "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
             st.write("**Segmentation Mask (Front View):**")
             st.image(combined_results["angle_results"][0]["mask"] * 255, clamp=True, use_container_width=True)
             
@@ -1311,10 +1346,13 @@ def display_enhanced_patch_based_results(combined_results, system, username):
                 metrics = combined_results["angle_results"][0]["mask_metrics"]
                 st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
                 st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+        else:
+            st.write("**Note:** Segmentation was disabled for this analysis.")
         
         st.write("**Model Processing Information:**")
         st.write(f"- Device used: {system.device}")
         st.write(f"- Two-Stage Analysis: Enabled")
+        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
         st.write(f"- Segmentation model input size: 256x256")
         st.write(f"- Classification model input size: 224x224")
     
@@ -1772,14 +1810,13 @@ def main():
                     status_text = st.empty()
                     
                     if use_enhanced_analysis:
-                        # Use the enhanced two-stage approach
                         status_text.text(f"Processing {st.session_state.selected_fruit} using two-stage analysis...")
                         progress_bar.progress(25)
-                        
-                        # Call the enhanced analysis method
+
                         results = system.analyze_ripeness_enhanced(
                             image_input,
                             fruit_type=st.session_state.selected_fruit.lower(),
+                            use_segmentation=use_segmentation
                         )
                         
                         progress_bar.progress(100)
@@ -1833,7 +1870,6 @@ def main():
                 
                 status_text.text(f"Processing {st.session_state.selected_fruit} from multiple angles...")
                 
-                # Process each angle
                 results_front = process_angle_image(
                     system, front_file, st.session_state.selected_fruit.lower(), "Front", 
                     use_segmentation, refine_segmentation, refinement_method, use_enhanced_analysis

@@ -129,28 +129,28 @@ def create_enhanced_visualization(results, original_img, segmented_img, save_pat
             
             # Create label - different for enhanced vs standard mode
             if is_enhanced:
-                # Enhanced mode: Class name only, without confidence
-                display_name = class_name.replace("_", " ").title()
-                label = display_name
+                # Enhanced mode: No label for two-stage analysis
+                label = ""  # Just an empty string to display no text
             else:
                 # Standard mode: Include confidence score
                 display_name = class_name.replace("_", " ").title()
                 label = f"{display_name}: {confidence:.2f}"
             
-            # Get text size
-            text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-            
-            # Ensure text background doesn't go outside image
-            text_x = x1
-            text_y = y1 - 10 if y1 - 10 > text_size[1] else y1 + text_size[1]
-            
-            # Draw text background
-            cv2.rectangle(visualization, (text_x, text_y - text_size[1]), 
-                        (text_x + text_size[0], text_y), color, -1)
-            
-            # Draw text
-            cv2.putText(visualization, label, (text_x, text_y), 
-                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            if label:  # Only draw text if label is not empty
+                # Get text size
+                text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                
+                # Ensure text background doesn't go outside image
+                text_x = x1
+                text_y = y1 - 10 if y1 - 10 > text_size[1] else y1 + text_size[1]
+                
+                # Draw text background
+                cv2.rectangle(visualization, (text_x, text_y - text_size[1]), 
+                            (text_x + text_size[0], text_y), color, -1)
+                
+                # Draw text
+                cv2.putText(visualization, label, (text_x, text_y), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     
     # Check if we need to look in other places for bounding boxes (fallback approach)
     if not has_predictions:
@@ -189,28 +189,28 @@ def create_enhanced_visualization(results, original_img, segmented_img, save_pat
                     
                     # Create label - different for enhanced vs standard mode
                     if is_enhanced:
-                        # Enhanced mode: Class name only, without confidence
-                        display_name = class_name.replace("_", " ").title()
-                        label = display_name
+                        # Enhanced mode: No label for two-stage analysis
+                        label = ""  # Empty string to display no text
                     else:
                         # Standard mode: Include confidence score
                         display_name = class_name.replace("_", " ").title()
                         label = f"{display_name}: {confidence:.2f}"
                     
-                    # Get text size
-                    text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                    
-                    # Ensure text background doesn't go outside image
-                    text_x = x1
-                    text_y = y1 - 10 if y1 - 10 > text_size[1] else y1 + text_size[1]
-                    
-                    # Draw text background
-                    cv2.rectangle(visualization, (text_x, text_y - text_size[1]), 
-                                (text_x + text_size[0], text_y), color, -1)
-                    
-                    # Draw text
-                    cv2.putText(visualization, label, (text_x, text_y), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                    if label:  # Only draw text if label is not empty
+                        # Get text size
+                        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                        
+                        # Ensure text background doesn't go outside image
+                        text_x = x1
+                        text_y = y1 - 10 if y1 - 10 > text_size[1] else y1 + text_size[1]
+                        
+                        # Draw text background
+                        cv2.rectangle(visualization, (text_x, text_y - text_size[1]), 
+                                    (text_x + text_size[0], text_y), color, -1)
+                        
+                        # Draw text
+                        cv2.putText(visualization, label, (text_x, text_y), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     
     # Add a title to the visualization
     fruit_type = results.get("fruit_type", "Unknown").title()
@@ -419,121 +419,131 @@ def create_combined_visualization(results, original_image, segmented_image, save
     
     segmentation_disabled = original_image is segmented_image
     
-    
-    
+    # Convert PIL image to OpenCV format for bounding box drawing
     original_cv = np.array(original_image)
     original_cv = cv2.cvtColor(original_cv, cv2.COLOR_RGB2BGR)
     
-    
+    # Get image dimensions
     height, width = original_cv.shape[:2]
     
-    
+    # Get raw predictions for bounding box drawing
     raw_predictions = results.get("raw_results", {}).get("predictions", [])
     fruit_type = results.get("fruit_type", "Unknown")
     
-    
+    # Define colors for multiple bounding boxes
     colors = [
-        (0, 0, 255),      
-        (255, 0, 0),      
-        (0, 255, 0),      
-        (255, 0, 255),    
-        (0, 255, 255),    
+        (0, 0, 255),      # Red
+        (255, 0, 0),      # Blue
+        (0, 255, 0),      # Green
+        (255, 0, 255),    # Magenta
+        (0, 255, 255),    # Yellow
     ]
     
-    
+    # Create a copy of the original image for bounding box drawing
     bbox_img = original_cv.copy()
     
+    # Check if this is a two-stage analysis
+    is_enhanced = results.get("analysis_type") == "enhanced_two_stage" or "confidence_distributions" in results
     
+    # Draw bounding boxes on the image
     box_count = 0
     for i, pred in enumerate(raw_predictions):
         if "x" in pred and "y" in pred and "width" in pred and "height" in pred:
-            
+            # Get prediction information
             class_name = pred.get("class", "unknown")
             confidence_score = pred.get("confidence", 0)
             
-            
+            # Get standardized ripeness label
             standardized_label = standardize_ripeness_label(fruit_type, class_name)
             
-            
+            # Skip if no ripeness label could be determined
             if standardized_label is None:
                 print(f"Skipping drawing bounding box for '{class_name}' class in combined visualization")
                 continue
                 
-            
+            # Get bounding box coordinates
             x = pred.get("x", 0)
             y = pred.get("y", 0)
             width_box = pred.get("width", 0)
             height_box = pred.get("height", 0)
             
-            
+            # Convert to top-left, bottom-right format
             x1 = int(x - width_box/2)
             y1 = int(y - height_box/2)
             x2 = int(x + width_box/2)
             y2 = int(y + height_box/2)
             
-            
+            # Ensure coordinates are within image bounds
             x1 = max(0, x1)
             y1 = max(0, y1)
             x2 = min(width-1, x2)
             y2 = min(height-1, y2)
             
-            
+            # Get color based on box count
             color = colors[box_count % len(colors)]
             box_count += 1
             
-            
+            # Draw bounding box
             cv2.rectangle(bbox_img, (x1, y1), (x2, y2), color, 3)
             
-            
-            label = f"{standardized_label} {int(confidence_score * 100)}%"
-            
-            
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.8
-            thickness = 2
-            
-            
-            text_size = cv2.getTextSize(label, font, font_scale, thickness)[0]
-            
-            
-            if y1 - text_size[1] - 10 >= 0:
-                
-                cv2.rectangle(bbox_img, (x1, y1-text_size[1]-10), (x1+text_size[0], y1), color, -1)
-                
-                cv2.putText(bbox_img, label, (x1, y1-5), font, font_scale, (255, 255, 255), thickness)
+            # Check if we should draw labels for this visualization
+            if is_enhanced:
+                # Skip creating a label for enhanced two-stage analysis
+                draw_label = False
             else:
+                # For regular analysis, create and draw the label as usual
+                draw_label = True
+            
+            if draw_label:
+                # Create the label text
+                label = f"{standardized_label} {int(confidence_score * 100)}%"
                 
-                cv2.rectangle(bbox_img, (x1, y2), (x1+text_size[0], y2+text_size[1]+10), color, -1)
-                cv2.putText(bbox_img, label, (x1, y2+text_size[1]+5), font, font_scale, (255, 255, 255), thickness)
+                # Set font properties
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.8
+                thickness = 2
+                
+                # Get text size
+                text_size = cv2.getTextSize(label, font, font_scale, thickness)[0]
+                
+                # Draw label box and text based on position
+                if y1 - text_size[1] - 10 >= 0:
+                    # Draw above the box if there's room
+                    cv2.rectangle(bbox_img, (x1, y1-text_size[1]-10), (x1+text_size[0], y1), color, -1)
+                    cv2.putText(bbox_img, label, (x1, y1-5), font, font_scale, (255, 255, 255), thickness)
+                else:
+                    # Draw below the box if not
+                    cv2.rectangle(bbox_img, (x1, y2), (x1+text_size[0], y2+text_size[1]+10), color, -1)
+                    cv2.putText(bbox_img, label, (x1, y2+text_size[1]+5), font, font_scale, (255, 255, 255), thickness)
     
-    
+    # Convert OpenCV image back to PIL for combined visualization
     bbox_img_pil = Image.fromarray(cv2.cvtColor(bbox_img, cv2.COLOR_BGR2RGB))
     
-    
+    # Get information for display
     fruit_type = results.get("fruit_type", "Unknown")
     confidence = results.get("classification_confidence", 0)
     ripeness_predictions = results.get("ripeness_predictions", [])
     
-    
+    # Define padding for layout
     padding = 30
     
     if segmentation_disabled:
-        
+        # Layout for no segmentation - original + bounding box only
         canvas_width = width * 2 + padding * 3  
     else:
         canvas_width = width * 3 + padding * 4  
     
-    
+    # Set height to include space for text information
     text_height = 150
     canvas_height = height + text_height + padding * 3
     
-    
+    # Create canvas for combined visualization
     canvas = Image.new('RGB', (canvas_width, canvas_height), (255, 255, 255))
     
-    
+    # Create drawing object
     draw = ImageDraw.Draw(canvas)
     
-    
+    # Try to find a usable font
     try:
         fonts = [f for f in fm.findSystemFonts() if 'arial' in f.lower() or 'helvetica' in f.lower()]
         if fonts:
@@ -549,7 +559,7 @@ def create_combined_visualization(results, original_image, segmented_image, save
         header_font = ImageFont.load_default()
         info_font = ImageFont.load_default()
     
-    
+    # Set title based on segmentation status
     if segmentation_disabled:
         title = f"Fruit Ripeness Detection: {fruit_type} (No Segmentation)"
     else:
@@ -558,7 +568,7 @@ def create_combined_visualization(results, original_image, segmented_image, save
     title_width = draw.textlength(title, font=title_font)
     draw.text(((canvas_width - title_width) // 2, padding // 2), title, fill=(0, 0, 0), font=title_font)
     
-    
+    # Set section headers based on segmentation status
     if segmentation_disabled:
         headers = ["Original Image", "Bounding Box Detection"]
     else:
@@ -569,21 +579,21 @@ def create_combined_visualization(results, original_image, segmented_image, save
         x_pos = padding + (width + padding) * i + width // 2 - header_width // 2
         draw.text((x_pos, padding * 2), header, fill=(0, 0, 0), font=header_font)
     
-    
+    # Add images to canvas
     canvas.paste(original_image, (padding, padding * 3))
     canvas.paste(bbox_img_pil, (padding * 2 + width, padding * 3))
     if not segmentation_disabled:
         canvas.paste(segmented_image, (padding * 3 + width * 2, padding * 3))
     
-    
+    # Add dividing line
     line_y = padding * 3 + height + padding // 2
     draw.line([(padding, line_y), (canvas_width - padding, line_y)], fill=(200, 200, 200), width=2)
     
-    
+    # Add fruit type and confidence information
     text_y = line_y + padding
     draw.text((padding, text_y), f"Fruit Type: {fruit_type} (Confidence: {confidence:.2f})", fill=(0, 0, 0), font=info_font)
     
-    
+    # Add ripeness predictions section
     text_y += 30
     draw.text((padding, text_y), "Ripeness Predictions:", fill=(0, 0, 0), font=info_font)
     
@@ -593,13 +603,13 @@ def create_combined_visualization(results, original_image, segmented_image, save
         text_y += 25
         draw.text((padding * 2, text_y), f"{ripeness}: {pred_confidence:.2f}", fill=(0, 0, 0), font=info_font)
     
-    
+    # Save the visualization
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         canvas.save(save_path)
         return save_path
     else:
-        
+        # Use default save path if none provided
         timestamp = int(time.time())
         default_save_path = f"results/complete_vis_{timestamp}.png"
         os.makedirs("results", exist_ok=True)
