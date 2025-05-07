@@ -283,8 +283,12 @@ def display_results(results, system, use_segmentation, username):
                     
                     if "visualizations" in results and "bounding_box_visualization" in results["visualizations"]:
                         bbox_path = results["visualizations"]["bounding_box_visualization"]
-                        bbox_img = Image.open(bbox_path)
-                        st.image(bbox_img, use_container_width=True)
+                        try:
+                            bbox_img = Image.open(bbox_path)
+                            st.image(bbox_img, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not load bounding box visualization: {str(e)}")
+                            st.image(results["original_image"], use_container_width=True)
                     else:
                         st.image(results["original_image"], use_container_width=True)
                 else:
@@ -312,51 +316,66 @@ def display_results(results, system, use_segmentation, username):
             if "visualizations" in results:
                 st.subheader("Enhanced Visualizations")
                 
-                
+                # Show combined visualization if available
                 if "combined_visualization" in results["visualizations"]:
                     combined_path = results["visualizations"]["combined_visualization"]
-                    combined_img = Image.open(combined_path)
-                    st.image(combined_img, use_container_width=True)
-                    
-                    st.markdown(
-                        get_image_download_link(
-                            combined_img, 
-                            "complete_analysis.png",
-                            "Download Complete Visualization"
-                        ),
-                        unsafe_allow_html=True
-                    )
+                    try:
+                        combined_img = Image.open(combined_path)
+                        st.image(combined_img, use_container_width=True)
+                        
+                        st.markdown(
+                            get_image_download_link(
+                                combined_img, 
+                                "complete_analysis.png",
+                                "Download Complete Visualization"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    except Exception as e:
+                        st.warning(f"Could not load combined visualization: {str(e)}")
                 
-                
+                # Create tabs for different visualization types
                 viz_tab1, viz_tab2 = st.tabs(["Bounding Box Detection", "Comparison View"])
                 
                 with viz_tab1:
-                    bbox_path = results["visualizations"]["bounding_box_visualization"]
-                    bbox_img = Image.open(bbox_path)
-                    st.image(bbox_img, use_container_width=True)
-                    
-                    st.markdown(
-                        get_image_download_link(
-                            bbox_img, 
-                            "ripeness_detection.png",
-                            "Download Bounding Box Visualization"
-                        ),
-                        unsafe_allow_html=True
-                    )
+                    if "bounding_box_visualization" in results["visualizations"]:
+                        bbox_path = results["visualizations"]["bounding_box_visualization"]
+                        try:
+                            bbox_img = Image.open(bbox_path)
+                            st.image(bbox_img, use_container_width=True)
+                            
+                            st.markdown(
+                                get_image_download_link(
+                                    bbox_img, 
+                                    "ripeness_detection.png",
+                                    "Download Bounding Box Visualization"
+                                ),
+                                unsafe_allow_html=True
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not load bounding box visualization: {str(e)}")
+                    else:
+                        st.info("Bounding box visualization not available")
                 
                 with viz_tab2:
-                    comparison_path = results["visualizations"]["comparison_visualization"]
-                    comparison_img = Image.open(comparison_path)
-                    st.image(comparison_img, use_container_width=True)
-                    
-                    st.markdown(
-                        get_image_download_link(
-                            comparison_img, 
-                            "comparison_result.png",
-                            "Download Comparison Visualization"
-                        ),
-                        unsafe_allow_html=True
-                    )
+                    if "comparison_visualization" in results["visualizations"]:
+                        comparison_path = results["visualizations"]["comparison_visualization"]
+                        try:
+                            comparison_img = Image.open(comparison_path)
+                            st.image(comparison_img, use_container_width=True)
+                            
+                            st.markdown(
+                                get_image_download_link(
+                                    comparison_img, 
+                                    "comparison_result.png",
+                                    "Download Comparison Visualization"
+                                ),
+                                unsafe_allow_html=True
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not load comparison visualization: {str(e)}")
+                    else:
+                        st.info("Comparison visualization not available")
             
         elif "error" in results:
             st.warning(f"Ripeness detection error: {results['error']}")
@@ -432,6 +451,10 @@ def display_results(results, system, use_segmentation, username):
                     with tab2:
                         if "visualizations" in results:
                             for layer_name, viz in results["visualizations"].items():
+                                # Skip non-layer visualizations
+                                if layer_name in ["bounding_box_visualization", "comparison_visualization", "combined_visualization"]:
+                                    continue
+                                    
                                 st.write(f"**{layer_name} Layer Comparison:**")
                                 st.image(viz, use_container_width=True)
                                 
@@ -545,17 +568,23 @@ def display_results(results, system, use_segmentation, username):
                 # Visualizations
                 if "visualizations" in results:
                     for viz_key, viz_path in results["visualizations"].items():
-                        image_paths[viz_key] = viz_path
+                        if os.path.exists(viz_path):
+                            image_paths[viz_key] = viz_path
                 
                 # Save the results
-                result_id = save_user_result(username, save_results, image_paths)
-                
-                st.success(f"✅ Analysis results saved successfully! (ID: {result_id})")
-                
-                # Add button to view history
-                if st.button("View Saved Results"):
-                    st.session_state.page = "history"
-                    st.rerun()
+                try:
+                    result_id = save_user_result(username, save_results, image_paths)
+                    
+                    st.success(f"✅ Analysis results saved successfully! (ID: {result_id})")
+                    
+                    # Add button to view history
+                    if st.button("View Saved Results"):
+                        st.session_state.page = "history"
+                        st.rerun()
+                except Exception as e:
+                    import traceback
+                    st.error(f"Error saving results: {str(e)}")
+                    st.error(traceback.format_exc())
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
@@ -577,7 +606,6 @@ def display_enhanced_results(results, system, username):
     with col1:
         st.subheader("Original Image with Detection")
         
-        # Check if bounding box visualization exists and show it
         if "visualizations" in results and "bounding_box_visualization" in results["visualizations"]:
             bbox_path = results["visualizations"]["bounding_box_visualization"]
             bbox_img = Image.open(bbox_path)
@@ -1680,6 +1708,10 @@ def main():
                             help="Drag and drop your image here or click to browse"
                         )
                         
+                        # Reset uploaded file in session state when file uploader is cleared
+                        if uploaded_file is None:
+                            st.session_state.uploaded_file = None
+                        
                         use_camera = st.checkbox("Use Camera Instead", key="use_camera_checkbox")
                         
                         if use_camera:
@@ -1691,19 +1723,20 @@ def main():
                             st.session_state.camera_image = None
                             if uploaded_file is not None:
                                 st.session_state.uploaded_file = uploaded_file
-                
-                if (st.session_state.uploaded_file is not None or 
-                    st.session_state.camera_image is not None):
                     
-                    preview_container = st.container()
-                    with preview_container:
-                        st.subheader("Image Preview")
+                    # Only show preview if we have a valid file in session state
+                    if (st.session_state.get("uploaded_file") is not None or 
+                        st.session_state.get("camera_image") is not None):
                         
-                        prev_col1, prev_col2, prev_col3 = st.columns([1, 2, 1])
-                        
-                        with prev_col2:
-                            image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
-                            st.image(image_input, use_container_width=True)
+                        preview_container = st.container()
+                        with preview_container:
+                            st.subheader("Image Preview")
+                            
+                            prev_col1, prev_col2, prev_col3 = st.columns([1, 2, 1])
+                            
+                            with prev_col2:
+                                image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
+                                st.image(image_input, use_container_width=True)
                     
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
@@ -1788,12 +1821,7 @@ def main():
                     st.write("---")
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
-                        if st.button(f"🔍 Start {st.session_state.selected_fruit} Analysis", type="primary", use_container_width=True):
-                            st.session_state.analysis_step = "analyze"
-                            st.session_state.start_analysis = True
-                            st.rerun()
-                else:
-                    st.warning("Please upload both front and back images for patch-based analysis")
+                        st.warning("Please upload both front and back images for patch-based analysis")
         
         elif st.session_state.analysis_step == "analyze":
             st.header(f"Analyzing {st.session_state.selected_fruit}")
@@ -1833,8 +1861,6 @@ def main():
                             image_input,
                             fruit_type=st.session_state.selected_fruit.lower()
                         )
-                        
-                        print(results)
                         
                         progress_bar.progress(100)
                         status_text.text("Enhanced analysis complete!")

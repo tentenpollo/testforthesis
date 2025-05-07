@@ -363,11 +363,9 @@ def visualize_regularization_impact_comparison(enhanced_model, training_metrics=
             
             title = 'Impact of Regularization Approaches on Validation Loss'
         else:
-            # Fallback to simulated data
             _create_improved_training_curves_with_fixed(ax2, current_seed)
             title = 'Impact of Regularization Approaches on Validation Loss'
     else:
-        # Use simulated data
         _create_improved_training_curves_with_fixed(ax2, current_seed)
         title = 'Impact of Regularization Approaches on Validation Loss'
     

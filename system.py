@@ -355,32 +355,53 @@ class FruitRipenessSystem:
             self.baseline_model, self.seg_model, self.key_comparison_layers
         )
         
+        # Try to generate regularization comparison, but handle failure gracefully
+        reg_comparison_visualization = None
         try:
             reg_comparison_visualization = visualize_regularization_impact_comparison(self.seg_model)
         except Exception as e:
             print(f"Warning: Could not create regularization comparison visualization: {e}")
-            reg_comparison_visualization = None
         
+        # Create feature map visualizations if available
+        feature_visualizations = {}
         
-        feature_visualizations = {
-            "Baseline Encoder": feature_map_visualization(
-                self.baseline_model.activations.get("enc3_conv1"), "Baseline Encoder Features"
-            ),
-            "SPEAR-UNet Encodere": feature_map_visualization(
-                self.seg_model.activations.get("encoder3_conv1"), "SPEARU-Net Encoder Features"
-            )
-        }
+        # Safely check for activations in baseline model
+        if hasattr(self.baseline_model, 'activations') and self.baseline_model.activations:
+            if "enc3_conv1" in self.baseline_model.activations:
+                try:
+                    feature_visualizations["Baseline Encoder"] = feature_map_visualization(
+                        self.baseline_model.activations.get("enc3_conv1"), "Baseline Encoder Features"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not visualize baseline encoder features: {e}")
         
-        # If available, add SFP and dynamic reg visualizations
-        if hasattr(self.seg_model, 'activations'):
+        # Safely check for activations in SPEAR-UNet model
+        if hasattr(self.seg_model, 'activations') and self.seg_model.activations:
+            if "encoder3_conv1" in self.seg_model.activations:
+                try:
+                    feature_visualizations["SPEAR-UNet Encoder"] = feature_map_visualization(
+                        self.seg_model.activations.get("encoder3_conv1"), "SPEAR-UNet Encoder Features"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not visualize SPEAR-UNet encoder features: {e}")
+            
+            # Add SFP visualization if available
             if "sfp3_out" in self.seg_model.activations:
-                feature_visualizations["SFP Output"] = feature_map_visualization(
-                    self.seg_model.activations["sfp3_out"], "Stochastic Feature Pyramid Output"
-                )
+                try:
+                    feature_visualizations["SFP Output"] = feature_map_visualization(
+                        self.seg_model.activations["sfp3_out"], "Stochastic Feature Pyramid Output"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not visualize SFP features: {e}")
+            
+            # Add dynamic regularization visualization if available
             if "reg3_out" in self.seg_model.activations:
-                feature_visualizations["Dynamic Reg Output"] = feature_map_visualization(
-                    self.seg_model.activations["reg3_out"], "Dynamic Regularization Output"
-                )
+                try:
+                    feature_visualizations["Dynamic Reg Output"] = feature_map_visualization(
+                        self.seg_model.activations["reg3_out"], "Dynamic Regularization Output"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not visualize regularization features: {e}")
         
         # Calculate improved IoU between masks
         intersection = np.logical_and(baseline_mask, enhanced_mask).sum()
@@ -550,7 +571,7 @@ class FruitRipenessSystem:
                 # Format the results
                 formatted_results = self.format_ripeness_results(fruit_type, predictions)
                 
-                # Create result dictionary
+                # Create result dictionary with only essential fields
                 result = {
                     "fruit_type": fruit_type,
                     "classification_confidence": 1.0,  # Using 1.0 as confidence since user-selected
@@ -569,18 +590,28 @@ class FruitRipenessSystem:
                 if angle_name:
                     result["angle_name"] = angle_name
                 
-                # Add the comparison metrics
-                result.update({
-                    "comparison_metrics": segmentation_results["comparison_metrics"],
-                    "visualizations": segmentation_results["visualizations"],
-                    "feature_maps": segmentation_results["feature_maps"],
-                    "regularization_viz": segmentation_results["regularization_viz"]
-                })
+                # Add comparison metrics if available
+                if "comparison_metrics" in segmentation_results:
+                    result["comparison_metrics"] = segmentation_results["comparison_metrics"]
+                
+                # Add visualizations if available
+                if "visualizations" in segmentation_results:
+                    result["visualizations"] = segmentation_results["visualizations"]
+                
+                # Add feature maps if available
+                if "feature_maps" in segmentation_results:
+                    result["feature_maps"] = segmentation_results["feature_maps"]
+                
+                # Add regularization comparison visualization if available
+                if "regularization_comparison_viz" in segmentation_results:
+                    result["regularization_comparison_viz"] = segmentation_results["regularization_comparison_viz"]
                 
                 # Create ripeness visualizations
                 try:
                     vis_results = self.visualize_results(result)
-                    result.update({"visualizations": {**result["visualizations"], **vis_results}})
+                    if "visualizations" not in result:
+                        result["visualizations"] = {}
+                    result["visualizations"].update(vis_results)
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
@@ -588,7 +619,7 @@ class FruitRipenessSystem:
                 
                 return result
             else:
-                # Handle case with no predictions
+                # Handle case with no predictions - same structure as above
                 result = {
                     "fruit_type": fruit_type,
                     "classification_confidence": 1.0,
@@ -606,23 +637,34 @@ class FruitRipenessSystem:
                 # Add angle name if provided
                 if angle_name:
                     result["angle_name"] = angle_name
-
-                result.update({
-                    "comparison_metrics": segmentation_results["comparison_metrics"],
-                    "visualizations": segmentation_results["visualizations"],
-                    "feature_maps": segmentation_results["feature_maps"],
-                    "regularization_viz": segmentation_results["regularization_viz"]
-                })
+                
+                # Add comparison metrics if available
+                if "comparison_metrics" in segmentation_results:
+                    result["comparison_metrics"] = segmentation_results["comparison_metrics"]
+                
+                # Add visualizations if available
+                if "visualizations" in segmentation_results:
+                    result["visualizations"] = segmentation_results["visualizations"]
+                
+                # Add feature maps if available
+                if "feature_maps" in segmentation_results:
+                    result["feature_maps"] = segmentation_results["feature_maps"]
+                
+                # Add regularization comparison visualization if available
+                if "regularization_comparison_viz" in segmentation_results:
+                    result["regularization_comparison_viz"] = segmentation_results["regularization_comparison_viz"]
                 
                 # Create visualizations anyway
                 try:
                     vis_results = self.visualize_results(result)
-                    result.update({"visualizations": {**result["visualizations"], **vis_results}})
+                    if "visualizations" not in result:
+                        result["visualizations"] = {}
+                    result["visualizations"].update(vis_results)
                 except Exception as e:
                     result["visualization_error"] = str(e)
                 
                 return result
-                
+                    
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -967,6 +1009,8 @@ class FruitRipenessSystem:
             if not detection_model_id:
                 raise ValueError(f"No detection model available for {fruit_type}")
             
+            detection_results = None  # Initialize to ensure it's available later
+            
             try:
                 # Get detection results
                 detection_results = self.roboflow_client.infer(
@@ -1018,6 +1062,12 @@ class FruitRipenessSystem:
                                     "confidence": 0.9,  # Default confidence
                                     "class": fruit_type_normalized
                                 })
+                    
+                    # Create a synthetic detection_results if we used fallback
+                    if detection_results is None:
+                        detection_results = {
+                            "predictions": predictions
+                        }
             except Exception as e:
                 print(f"Error using Roboflow detection model: {str(e)}")
                 # Fallback: use the whole image
@@ -1030,6 +1080,11 @@ class FruitRipenessSystem:
                     "confidence": 1.0,
                     "class": fruit_type_normalized
                 }]
+                
+                # Create a synthetic detection_results
+                detection_results = {
+                    "predictions": predictions
+                }
             
             # STEP 3: Process each detected fruit
             fruits_data = []
@@ -1072,9 +1127,22 @@ class FruitRipenessSystem:
                 "classification_results": classification_results,
                 "confidence_distributions": confidence_distributions,
                 "segmentation_results": segmentation_results,
-                "mask": mask
+                "mask": mask,
+                # IMPORTANT: Add the raw detection results for visualization
+                "raw_results": detection_results  
             }
-            final_result = debug_and_fix_enhanced_results(final_result)
+            
+            # Create visualizations directly here
+            try:
+                vis_results = self.visualize_results(final_result)
+                final_result["visualizations"] = vis_results
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Error creating visualizations: {str(e)}")
+            
+            if hasattr(self, 'debug_and_fix_enhanced_results'):
+                final_result = self.debug_and_fix_enhanced_results(final_result)
             
             return final_result
             
