@@ -181,7 +181,7 @@ class FruitRipenessSystem:
             "mango": {"type": "roboflow", "model_id": "mango-c80fq/1"},
             "tomato": {"type": "roboflow", "model_id": "classification-tomatoes/2"},
             "strawberry": {"type": "custom", "model_key": "strawberry"},
-            "pineapple": {"type": "roboflow", "model_id": "pineapple-maturity-project-app/1"}
+            "pineapple": {"type": "custom", "model_key": "pineapple"}
         }
         
         self.supported_fruits = list(self.fruit_to_model.keys())
