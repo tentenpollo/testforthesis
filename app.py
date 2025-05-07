@@ -1738,11 +1738,23 @@ def main():
                                 image_input = st.session_state.camera_image if st.session_state.camera_image is not None else st.session_state.uploaded_file
                                 st.image(image_input, use_container_width=True)
                     
-                    col1, col2, col3 = st.columns([1, 2, 1])
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        
                     with col2:
-                        if st.button("🔍 Start Analysis", type="primary", use_container_width=True):
+                        # Check if we have either uploaded file or camera image
+                        has_valid_image = (st.session_state.get("uploaded_file") is not None or 
+                                        st.session_state.get("camera_image") is not None)
+                        
+                        # Only enable button if we have an image
+                        if st.button("🔍 Start Analysis", 
+                                type="primary", 
+                                use_container_width=True,
+                                disabled=not has_valid_image):
                             st.session_state.analysis_step = "analyze"
                             st.rerun()
+                        
+                        if not has_valid_image:
+                            st.info("Please upload an image or take a photo to proceed")
             
             elif analysis_type == "Patch-Based (Multiple Angles)":
                 st.write(f"Upload images of the {st.session_state.selected_fruit} from different angles:")
