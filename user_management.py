@@ -6,6 +6,7 @@ import datetime
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 import shutil
+from utils.helpers import make_serializable
 
 USER_DB_PATH = "data/users.json"
 USER_RESULTS_PATH = "data/user_results"
@@ -197,6 +198,104 @@ def save_user_result(username: str, result_data: Dict, image_paths: Dict = None)
                 )
     
     return result_id
+
+def save_enhanced_user_result(username, result_data, image_paths=None):
+    """
+    Save a user's enhanced two-stage fruit analysis result with improved error handling
+    
+    Args:
+        username: The username of the user
+        result_data: Dictionary containing the enhanced analysis results
+        image_paths: Dictionary of image paths to save with the result
+        
+    Returns:
+        ID of the saved result
+    """
+    import os
+    import json
+    import datetime
+    import shutil
+    import traceback
+    
+    try:
+        # Create a unique ID for this result
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        result_id = f"{username}_enhanced_{timestamp}"
+        
+        # Create a directory for this result
+        results_path = "data/user_results"
+        result_dir = os.path.join(results_path, username, result_id)
+        os.makedirs(result_dir, exist_ok=True)
+        
+        # Determine fruit type and number of fruits
+        fruit_type = result_data.get("fruit_type", "Unknown")
+        num_fruits = result_data.get("num_fruits", 1)
+        
+        # Create metadata for this analysis
+        metadata = {
+            "id": result_id,
+            "username": username,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "fruit_type": fruit_type,
+            "analysis_type": "enhanced_two_stage",
+            "num_fruits": num_fruits,
+            "user_note": result_data.get("user_note", "")
+        }
+        
+        # Find highest confidence ripeness if available
+        if "confidence_distributions" in result_data and result_data["confidence_distributions"]:
+            first_dist = result_data["confidence_distributions"][0]
+            if first_dist and isinstance(first_dist, dict):
+                # Filter out non-confidence keys
+                filtered_dist = {k: v for k, v in first_dist.items() 
+                               if k not in ["error", "estimated"] and isinstance(v, (int, float))}
+                
+                # Find highest confidence ripeness
+                if filtered_dist:
+                    highest_ripeness = max(filtered_dist.items(), key=lambda x: x[1])
+                    metadata["primary_ripeness"] = highest_ripeness[0]
+                    metadata["primary_confidence"] = highest_ripeness[1]
+        
+        # Save the metadata
+        metadata_path = os.path.join(result_dir, "metadata.json")
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        
+        # Save the serialized result data
+        result_data_path = os.path.join(result_dir, "full_result.json")
+        with open(result_data_path, 'w') as f:
+            json.dump(result_data, f, indent=4)
+        
+        # Save image files if provided
+        if image_paths and isinstance(image_paths, dict):
+            for image_type, image_path in image_paths.items():
+                if os.path.isfile(image_path):
+                    # Create a descriptive filename
+                    if image_type == "original":
+                        output_filename = f"original_{fruit_type}.png"
+                    elif image_type == "segmented":
+                        output_filename = f"segmented_{fruit_type}.png"
+                    elif image_type == "mask":
+                        output_filename = f"mask_{fruit_type}.png"
+                    elif image_type == "bounding_box_visualization":
+                        output_filename = f"detection_{fruit_type}.png"
+                    else:
+                        # Default case
+                        output_filename = f"{image_type}.png"
+                    
+                    # Copy the file
+                    try:
+                        dst_path = os.path.join(result_dir, output_filename)
+                        shutil.copy2(image_path, dst_path)
+                    except Exception as e:
+                        print(f"Warning: Failed to copy {image_path} to {dst_path}: {str(e)}")
+        
+        return result_id
+        
+    except Exception as e:
+        print(f"Error saving enhanced user result: {str(e)}")
+        print(traceback.format_exc())
+        raise Exception(f"Failed to save results: {str(e)}")
 
 def convert_to_serializable(obj):
     """

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import cv2
 import base64
 from io import BytesIO
-
+import json
 def seed_everything(seed=42):
     """Set random seeds for reproducibility"""
     random.seed(seed)
@@ -139,3 +139,46 @@ def load_mask_from_output(output, threshold=0.5):
         mask = torch.sigmoid(output) > threshold
         mask = mask.squeeze().cpu().numpy().astype(np.uint8)
     return mask
+
+def make_serializable(obj):
+    """
+    Improved function to convert complex objects to JSON-serializable types
+    
+    Args:
+        obj: The object to convert
+        
+    Returns:
+        A JSON-serializable version of the object
+    """
+    import numpy as np
+    from PIL import Image
+    
+    if obj is None:
+        return None
+    elif isinstance(obj, (str, int, float, bool)):
+        return obj
+    elif isinstance(obj, dict):
+        return {k: make_serializable(v) for k, v in obj.items() if k not in ["original_image", "segmented_image"]}
+    elif isinstance(obj, list) or isinstance(obj, tuple):
+        return [make_serializable(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        if obj.size > 1000000:  # Large arrays (like masks)
+            # For large arrays, just return shape and data type info
+            return {"__numpy_array__": True, "shape": obj.shape, "dtype": str(obj.dtype)}
+        else:
+            return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, Image.Image):
+        # Return dictionary with image info instead of the image itself
+        return {"__pil_image__": True, "size": obj.size, "mode": obj.mode}
+    else:
+        # For other objects, convert to string representation
+        try:
+            return str(obj)
+        except:
+            return "Unserializable object"

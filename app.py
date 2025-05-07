@@ -7,10 +7,11 @@ import numpy as np
 import time
 import torch
 import io
+import json
 
 from system import FruitRipenessSystem
-from utils.helpers import get_image_download_link, seed_everything
-from user_management import initialize_database, save_user_result
+from utils.helpers import get_image_download_link, seed_everything, make_serializable
+from user_management import initialize_database, save_user_result, save_enhanced_user_result
 from authentication import show_login_page, get_current_user
 from user_history import show_history_page, show_result_details
 from huggingface_hub import hf_hub_download
@@ -922,6 +923,10 @@ def display_enhanced_results(results, system, username):
             3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
             """)
     
+    st.subheader("Save Results")
+
+    st.subheader("Save Results")
+
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
@@ -929,11 +934,11 @@ def display_enhanced_results(results, system, username):
             save_note = st.text_input("Add a note about this analysis (optional)", key="enhanced_save_note")
         
         with save_col2:
-            save_button = st.button("💾 Save Enhanced Analysis Results", type="primary", key="enhanced_save_button")
+            save_button = st.button("💾 Save Analysis Results", type="primary", key="enhanced_save_button")
             
             if save_button:
-                # Prepare a copy of results for saving
-                save_results = results.copy()
+                # Create serializable copy of results
+                save_results = make_serializable(results)
                 
                 # Add user's note
                 save_results["user_note"] = save_note
@@ -943,21 +948,20 @@ def display_enhanced_results(results, system, username):
                 
                 # IMPROVED IMAGE PATH SAVING
                 image_paths = {}
+                timestamp = int(time.time())
                 
-                # Make sure to save the original image
-                if isinstance(results["original_image"], Image.Image):
-                    # Save original image if it's a PIL Image
-                    original_path = f"results/original_{int(time.time())}.png"
+                # Save original image
+                if isinstance(results.get("original_image"), Image.Image):
+                    original_path = f"results/original_{timestamp}.png"
                     results["original_image"].save(original_path)
                     image_paths["original"] = original_path
                     save_results["original_image_path"] = original_path
                 elif "original_image_path" in results:
-                    # Use existing path if available
-                    image_paths["original"] = results["original_image_path"] 
+                    image_paths["original"] = results["original_image_path"]
                 
-                # Segmented image
-                if "segmented_image" in results and isinstance(results["segmented_image"], Image.Image):
-                    segmented_path = f"results/segmented_{int(time.time())}.png"
+                # Save segmented image
+                if isinstance(results.get("segmented_image"), Image.Image):
+                    segmented_path = f"results/segmented_{timestamp}.png"
                     results["segmented_image"].save(segmented_path)
                     image_paths["segmented"] = segmented_path
                     save_results["segmented_image_path"] = segmented_path
@@ -976,28 +980,40 @@ def display_enhanced_results(results, system, username):
                     results.get("confidence_distributions", [])
                 )):
                     if distribution and "error" not in distribution:
-                        viz_path = visualize_confidence_distribution(
-                            fruit_data, distribution, fruit_type, 
-                            save_path=f"results/fruit_{i+1}_dist_{int(time.time())}.png"
-                        )
-                        image_paths[f"fruit_{i+1}_distribution"] = viz_path
+                        try:
+                            viz_path = visualize_confidence_distribution(
+                                fruit_data, distribution, fruit_type, 
+                                save_path=f"results/fruit_{i+1}_dist_{timestamp}.png"
+                            )
+                            image_paths[f"fruit_{i+1}_distribution"] = viz_path
+                        except Exception as e:
+                            st.warning(f"Could not save visualization for fruit #{i+1}: {str(e)}")
                 
                 # Save all fruits visualization if multiple fruits
                 if num_fruits > 1:
-                    all_viz_path = visualize_all_fruits_confidence(
-                        results, 
-                        save_path=f"results/all_fruits_dist_{int(time.time())}.png"
-                    )
-                    image_paths["all_fruits_distribution"] = all_viz_path
+                    try:
+                        all_viz_path = visualize_all_fruits_confidence(
+                            results, 
+                            save_path=f"results/all_fruits_dist_{timestamp}.png"
+                        )
+                        image_paths["all_fruits_distribution"] = all_viz_path
+                    except Exception as e:
+                        st.warning(f"Could not save combined visualization: {str(e)}")
                 
-                result_id = save_user_result(username, save_results, image_paths)
-                
-                st.success(f"✅ Enhanced analysis results saved successfully! (ID: {result_id})")
-                
-                # Add button to view history
-                if st.button("View Saved Results", key="enhanced_view_history"):
-                    st.session_state.page = "history"
-                    st.rerun()
+                try:
+                    # Save the results
+                    result_id = save_enhanced_user_result(username, save_results, image_paths)
+                    st.success(f"✅ Analysis results saved successfully! (ID: {result_id})")
+                    
+                    # Add button to view history
+                    if st.button("View Saved Results", key="enhanced_view_history"):
+                        st.session_state.page = "history"
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving results: {str(e)}")
+                    # Add detailed error output for debugging
+                    import traceback
+                    st.text(traceback.format_exc())
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
@@ -1817,6 +1833,8 @@ def main():
                             image_input,
                             fruit_type=st.session_state.selected_fruit.lower()
                         )
+                        
+                        print(results)
                         
                         progress_bar.progress(100)
                         status_text.text("Enhanced analysis complete!")
