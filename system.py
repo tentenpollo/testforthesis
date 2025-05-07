@@ -239,7 +239,7 @@ class FruitRipenessSystem:
         
         self.classification_models = {
             "banana": {"type": "roboflow", "model_id": "pisang_susu/1"},
-            "mango": {"type": "roboflow", "model_id": "mango-c80fq/1"},
+            "mango": {"type": "custom", "model_key": "mango"},
             "tomato": {"type": "custom", "model_key": "tomato"},
             "strawberry": {"type": "custom", "model_key": "strawberry"},
             "pineapple": {"type": "custom", "model_key": "pineapple"}
@@ -1434,7 +1434,7 @@ class FruitRipenessSystem:
             if class_name_lower in ["unripe", "unripe-1-20-", "early_ripe-21-40-"]:
                 return "Unripe"
             elif class_name_lower in ["semiripe", "semi-ripe", "partially_ripe-41-60-", "semi_ripe"]:
-                return "Underripe"  # Renamed from "Partially Ripe" to "Underripe" as requested
+                return "Underripe" 
             elif class_name_lower in ["ripe", "ripe-61-80-", "fully ripe"]:
                 return "Ripe"
             elif class_name_lower in ["overripe", "over_ripe-81-100-", "over-ripe", "perished", "rotten"]:

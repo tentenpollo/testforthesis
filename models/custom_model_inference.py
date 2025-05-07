@@ -73,6 +73,20 @@ class CustomModelInference:
             "drop_path_rate": 0.2  # Called 'stochastic_depth' in the training config
         }
         
+        # Add new tomato model configuration
+        self.model_configs["mango"] = {
+            "repo_id": "TentenPolllo/mango",  # Update with your actual repo once published
+            "filename": "best_mango_model.pth",
+            "input_size": (256, 256),  # Matches the img_size in the training config
+            "normalize_mean": [0.485, 0.456, 0.406],
+            "normalize_std": [0.229, 0.224, 0.225],
+            "model_arch": "convnext_tiny",
+            "num_classes": 4,  # Assuming 3 classes: Unripe, Ripe, Overripe
+            "class_names": ["Unripe", "Ripe", "Underripe", "Overripe"],  # Update if your classes are different
+            "use_timm": True,  # The training script uses timm implementation
+            "drop_rate": 0.3,  # Matches the training config
+            "drop_path_rate": 0.2  # Called 'stochastic_depth' in the training config
+        }
         
     
     def _create_model(self, model_config):
