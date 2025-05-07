@@ -966,12 +966,17 @@ class FruitRipenessSystem:
             print(f"Error using Roboflow model: {str(e)}")
             return {"predictions": [], "error": str(e)}
         
-    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type):
+    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False):
         """
         Enhanced ripeness analysis flow:
         1. Initial segmentation to remove background
-        2. Use Roboflow detection to get objects
-        3. For each detected object: crop → segment crop → classify
+        2. For patch-based: skip detection and go straight to classification
+        3. For non-patch-based: detect objects then classify each
+        
+        Args:
+            image_path_or_file: Path to image or file-like object
+            fruit_type: Type of fruit to analyze
+            is_patch_based: Whether this is part of patch-based analysis
         """
         try:
             # Open and preprocess the image
@@ -999,78 +1004,9 @@ class FruitRipenessSystem:
             segmented_img = segmentation_results["segmented_image"]
             mask = segmentation_results["mask"]
             
-            # Save segmented image for detection
-            temp_segmented_path = f"results/temp_segmented_{int(time.time())}.png"
-            segmented_img.save(temp_segmented_path)
-            
-            # STEP 2: Use Roboflow to detect objects in the segmented image
-            print(f"Detecting fruits using Roboflow model...")
-            detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
-            if not detection_model_id:
-                raise ValueError(f"No detection model available for {fruit_type}")
-            
-            detection_results = None  # Initialize to ensure it's available later
-            
-            try:
-                # Get detection results
-                detection_results = self.roboflow_client.infer(
-                    temp_segmented_path, 
-                    model_id=detection_model_id
-                )
-                predictions = detection_results.get("predictions", [])
-                
-                # Clean up temporary file
-                if os.path.exists(temp_segmented_path):
-                    os.remove(temp_segmented_path)
-                    
-                print(f"Detected {len(predictions)} fruits in the image")
-                
-                # If no fruits detected, try a fallback approach
-                if not predictions:
-                    print("No fruits detected by detection model. Using fallback approach...")
-                    # Use connected components as fallback
-                    num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
-                    num_fruits = num_labels - 1
-                    
-                    # If still no fruits, create a single bounding box for the entire image
-                    if num_fruits < 1:
-                        img_width, img_height = original_img.size
-                        predictions = [{
-                            "x": img_width / 2,
-                            "y": img_height / 2,
-                            "width": img_width,
-                            "height": img_height,
-                            "confidence": 1.0,
-                            "class": fruit_type_normalized
-                        }]
-                    else:
-                        # Create bounding boxes for each connected component
-                        predictions = []
-                        for label in range(1, num_labels):  # Skip background (0)
-                            # Create mask for this component
-                            component_mask = (labels == label).astype(np.uint8)
-                            # Find contours
-                            contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                            if contours:
-                                # Get bounding box
-                                x, y, w, h = cv2.boundingRect(contours[0])
-                                predictions.append({
-                                    "x": x + w/2,  # Convert to center coordinates
-                                    "y": y + h/2,
-                                    "width": w,
-                                    "height": h,
-                                    "confidence": 0.9,  # Default confidence
-                                    "class": fruit_type_normalized
-                                })
-                    
-                    # Create a synthetic detection_results if we used fallback
-                    if detection_results is None:
-                        detection_results = {
-                            "predictions": predictions
-                        }
-            except Exception as e:
-                print(f"Error using Roboflow detection model: {str(e)}")
-                # Fallback: use the whole image
+            # For patch-based analysis, skip detection and create a single bounding box
+            if is_patch_based:
+                print("Patch-based analysis - skipping object detection")
                 img_width, img_height = original_img.size
                 predictions = [{
                     "x": img_width / 2,
@@ -1080,13 +1016,85 @@ class FruitRipenessSystem:
                     "confidence": 1.0,
                     "class": fruit_type_normalized
                 }]
+                detection_results = {"predictions": predictions}
+            else:
+                # Regular flow with object detection
+                temp_segmented_path = f"results/temp_segmented_{int(time.time())}.png"
+                segmented_img.save(temp_segmented_path)
                 
-                # Create a synthetic detection_results
-                detection_results = {
-                    "predictions": predictions
-                }
+                # STEP 2: Use Roboflow to detect objects in the segmented image
+                print(f"Detecting fruits using Roboflow model...")
+                detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
+                if not detection_model_id:
+                    raise ValueError(f"No detection model available for {fruit_type}")
+                
+                try:
+                    # Get detection results
+                    detection_results = self.roboflow_client.infer(
+                        temp_segmented_path, 
+                        model_id=detection_model_id
+                    )
+                    predictions = detection_results.get("predictions", [])
+                    
+                    # Clean up temporary file
+                    if os.path.exists(temp_segmented_path):
+                        os.remove(temp_segmented_path)
+                        
+                    print(f"Detected {len(predictions)} fruits in the image")
+                    
+                    # If no fruits detected, use fallback approach
+                    if not predictions:
+                        print("No fruits detected by detection model. Using fallback approach...")
+                        # Use connected components as fallback
+                        num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
+                        num_fruits = num_labels - 1
+                        
+                        # If still no fruits, create a single bounding box
+                        if num_fruits < 1:
+                            img_width, img_height = original_img.size
+                            predictions = [{
+                                "x": img_width / 2,
+                                "y": img_height / 2,
+                                "width": img_width,
+                                "height": img_height,
+                                "confidence": 1.0,
+                                "class": fruit_type_normalized
+                            }]
+                        else:
+                            # Create bounding boxes for each connected component
+                            predictions = []
+                            for label in range(1, num_labels):  # Skip background (0)
+                                component_mask = (labels == label).astype(np.uint8)
+                                contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                if contours:
+                                    x, y, w, h = cv2.boundingRect(contours[0])
+                                    predictions.append({
+                                        "x": x + w/2,
+                                        "y": y + h/2,
+                                        "width": w,
+                                        "height": h,
+                                        "confidence": 0.9,
+                                        "class": fruit_type_normalized
+                                    })
+                        
+                        # Create synthetic detection_results if we used fallback
+                        if detection_results is None:
+                            detection_results = {"predictions": predictions}
+                except Exception as e:
+                    print(f"Error using Roboflow detection model: {str(e)}")
+                    # Fallback: use the whole image
+                    img_width, img_height = original_img.size
+                    predictions = [{
+                        "x": img_width / 2,
+                        "y": img_height / 2,
+                        "width": img_width,
+                        "height": img_height,
+                        "confidence": 1.0,
+                        "class": fruit_type_normalized
+                    }]
+                    detection_results = {"predictions": predictions}
             
-            # STEP 3: Process each detected fruit
+            # STEP 3: Process each detected fruit (only one for patch-based)
             fruits_data = []
             classification_results = []
             confidence_distributions = []
@@ -1128,11 +1136,11 @@ class FruitRipenessSystem:
                 "confidence_distributions": confidence_distributions,
                 "segmentation_results": segmentation_results,
                 "mask": mask,
-                # IMPORTANT: Add the raw detection results for visualization
-                "raw_results": detection_results  
+                "raw_results": detection_results,
+                "is_patch_based": is_patch_based  # Add flag for display functions
             }
             
-            # Create visualizations directly here
+            # Create visualizations
             try:
                 vis_results = self.visualize_results(final_result)
                 final_result["visualizations"] = vis_results

@@ -228,7 +228,8 @@ def process_angle_image(system, image_file, fruit_type, angle_name, use_segmenta
             # Use the enhanced two-stage analysis
             results = system.analyze_ripeness_enhanced(
                 image_file,
-                fruit_type=fruit_type
+                fruit_type=fruit_type,
+                is_patch_based=True
             )
             # Add angle name to results
             results["angle_name"] = angle_name
@@ -1046,24 +1047,45 @@ def display_enhanced_results(results, system, username):
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
 def display_patch_based_results(combined_results, system, use_segmentation, username):
-    """Display results for patch-based analysis"""
+    """Display results for patch-based analysis, aligned with display_results"""
     if "error" in combined_results and "angle_results" not in combined_results:
         st.error(f"Error: {combined_results['error']}")
         return
     
-    
-    st.subheader("📊 Patch-Based Analysis Results")
+    # Header section similar to display_results
+    st.header(f"🍎 {combined_results['fruit_type'].title()} Ripeness Analysis")
     st.info(f"Analyzed {combined_results['num_angles']} angles of the fruit")
     
+    # Main content columns - similar structure to display_results
+    col1, col2 = st.columns(2)
     
-    st.subheader("🔍 Fruit Analysis")
-    st.write(f"**Selected Fruit:** {combined_results['fruit_type'].title()}")
+    with col1:
+        st.subheader("Original Image (Front View)")
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
     
+    with col2:
+        if use_segmentation:
+            st.subheader("Segmented Image (Front View)")
+            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                st.image(combined_results["angle_results"][0]["segmented_image"], use_container_width=True)
+        else:
+            st.subheader("Processed Image (Front View)")
+            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                if "visualizations" in combined_results["angle_results"][0] and "bounding_box_visualization" in combined_results["angle_results"][0]["visualizations"]:
+                    bbox_path = combined_results["angle_results"][0]["visualizations"]["bounding_box_visualization"]
+                    try:
+                        bbox_img = Image.open(bbox_path)
+                        st.image(bbox_img, use_container_width=True)
+                    except:
+                        st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
+                else:
+                    st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
     
-    st.subheader("🍌 Combined Ripeness Detection")
+    # Ripeness detection section - similar to display_results but for combined results
+    st.subheader("Combined Ripeness Detection")
     
     if "ripeness_predictions" in combined_results and combined_results["ripeness_predictions"]:
-        
         ripeness_data = {
             "Ripeness Level": [],
             "Average Confidence": []
@@ -1073,45 +1095,41 @@ def display_patch_based_results(combined_results, system, use_segmentation, user
             ripeness_data["Ripeness Level"].append(pred["ripeness"])
             ripeness_data["Average Confidence"].append(f"{pred['confidence']:.2f}")
         
-        
         st.table(ripeness_data)
     elif "error" in combined_results:
         st.warning(f"Ripeness detection error: {combined_results['error']}")
     
+    # Angle-specific tabs - unique to patch-based
+    st.subheader("Angle-Specific Analysis")
+    angle_tabs = st.tabs(combined_results["angle_names"])
     
-    angle_results = combined_results["angle_results"]
-    angle_names = combined_results["angle_names"]
-    
-    
-    angle_tabs = st.tabs(angle_names)
-    
-    
-    for i, (tab, angle_result) in enumerate(zip(angle_tabs, angle_results)):
+    for i, (tab, angle_result) in enumerate(zip(angle_tabs, combined_results["angle_results"])):
         with tab:
-            col1, col2 = st.columns(2)
+            angle_col1, angle_col2 = st.columns(2)
             
-            with col1:
-                st.write(f"**Original {angle_names[i]} View**")
+            with angle_col1:
+                st.subheader(f"Original {combined_results['angle_names'][i]}")
                 st.image(angle_result["original_image"], use_container_width=True)
             
-            with col2:
+            with angle_col2:
                 if use_segmentation:
-                    st.write(f"**Segmented {angle_names[i]} View**")
+                    st.subheader(f"Segmented {combined_results['angle_names'][i]}")
                     st.image(angle_result["segmented_image"], use_container_width=True)
                 else:
+                    st.subheader(f"Processed {combined_results['angle_names'][i]}")
                     if "visualizations" in angle_result and "bounding_box_visualization" in angle_result["visualizations"]:
-                        st.write(f"**Detection Results for {angle_names[i]} View**")
                         bbox_path = angle_result["visualizations"]["bounding_box_visualization"]
-                        bbox_img = Image.open(bbox_path)
-                        st.image(bbox_img, use_container_width=True)
+                        try:
+                            bbox_img = Image.open(bbox_path)
+                            st.image(bbox_img, use_container_width=True)
+                        except:
+                            st.image(angle_result["original_image"], use_container_width=True)
                     else:
-                        st.write(f"**Processed {angle_names[i]} View**")
                         st.image(angle_result["original_image"], use_container_width=True)
             
-            
-            st.write(f"**Ripeness Predictions for {angle_names[i]} View:**")
+            # Angle-specific ripeness predictions
+            st.subheader(f"{combined_results['angle_names'][i]} Ripeness")
             if "ripeness_predictions" in angle_result and angle_result["ripeness_predictions"]:
-                
                 angle_ripeness_data = {
                     "Ripeness Level": [],
                     "Confidence": []
@@ -1121,117 +1139,79 @@ def display_patch_based_results(combined_results, system, use_segmentation, user
                     angle_ripeness_data["Ripeness Level"].append(pred["ripeness"])
                     angle_ripeness_data["Confidence"].append(f"{pred['confidence']:.2f}")
                 
-                
                 st.table(angle_ripeness_data)
-            else:
-                st.write("No ripeness predictions for this angle")
+    
+    # Technical details section - similar to display_results
+    with st.expander("Technical Details"):
+        if use_segmentation and "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            st.write("**Segmentation Mask (Front View):**")
+            st.image(combined_results["angle_results"][0]["mask"] * 255, clamp=True, use_container_width=True)
             
-            
-            if "visualizations" in angle_result and "combined_visualization" in angle_result["visualizations"]:
-                st.write(f"**Visualization for {angle_names[i]} View:**")
-                combined_path = angle_result["visualizations"]["combined_visualization"]
-                combined_img = Image.open(combined_path)
-                st.image(combined_img, use_container_width=True)
+            if "mask_metrics" in combined_results["angle_results"][0]:
+                st.write("**Mask Quality Metrics:**")
+                metrics = combined_results["angle_results"][0]["mask_metrics"]
+                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+        
+        st.write("**Model Processing Information:**")
+        st.write(f"- Device used: {system.device}")
+        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
+        if use_segmentation:
+            st.write(f"- Segmentation model input size: 256x256")
+            st.write(f"- Mask refinement: {'Enabled' if 'refine_segmentation' in combined_results and combined_results['refine_segmentation'] else 'Disabled'}")
+            if "refine_segmentation" in combined_results and combined_results['refine_segmentation']:
+                st.write(f"- Refinement method: {combined_results.get('refinement_method', 'all')}")
+        st.write(f"- Classifier model input size: 224x224")
+        
+        if "raw_results" in combined_results:
+            st.write("**Raw Ripeness Detection Results:**")
+            st.json(combined_results["raw_results"])
     
-    
-    st.subheader("📊 Angle Comparison")
-    
-    
-    all_ripeness_levels = set()
-    for result in angle_results:
-        if "ripeness_predictions" in result and result["ripeness_predictions"]:
-            for pred in result["ripeness_predictions"]:
-                all_ripeness_levels.add(pred["ripeness"])
-    
-    if all_ripeness_levels:
-        ripeness_levels = list(all_ripeness_levels)
-        ripeness_data = []
-        
-        for level in ripeness_levels:
-            level_data = {"ripeness": level}
-            for i, result in enumerate(angle_results):
-                confidence = 0
-                if "ripeness_predictions" in result and result["ripeness_predictions"]:
-                    for pred in result["ripeness_predictions"]:
-                        if pred["ripeness"] == level:
-                            confidence = pred["confidence"]
-                            break
-                level_data[angle_names[i]] = confidence
-            ripeness_data.append(level_data)
-        
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        bar_width = 0.2
-        index = np.arange(len(ripeness_levels))
-        
-        for i, angle in enumerate(angle_names):
-            values = [data[angle] for data in ripeness_data]
-            ax.bar(index + i*bar_width, values, bar_width, label=angle)
-        
-        ax.set_xlabel('Ripeness Level')
-        ax.set_ylabel('Confidence')
-        ax.set_title('Ripeness Predictions by Angle')
-        ax.set_xticks(index + bar_width * (len(angle_names) - 1) / 2)
-        ax.set_xticklabels(ripeness_levels)
-        ax.legend()
-        
-        st.pyplot(fig)
-    else:
-        st.write("No ripeness predictions available for comparison")
-    st.subheader("Save Results")
-
+    # Save results section - similar to display_results
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
         with save_col1:
-            save_note = st.text_input("Add a note about this multi-angle analysis (optional)")
+            save_note = st.text_input("Add a note about this analysis (optional)")
         
         with save_col2:
-            save_button = st.button("💾 Save Multi-Angle Results", type="primary")
+            save_button = st.button("💾 Save Analysis Results", type="primary")
             
             if save_button:
-                # Prepare a copy of results for saving
                 save_results = combined_results.copy()
-                
-                # Add user's note
                 save_results["user_note"] = save_note
-                
-                # Add segmentation info
                 save_results["segmentation"] = use_segmentation
                 
-                # Save image paths for storage
                 image_paths = {}
                 
-                # Get paths from the first angle result (for overall representation)
-                first_angle = combined_results["angle_results"][0]
+                # Save images from first angle as representative
+                if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                    first_angle = combined_results["angle_results"][0]
+                    
+                    if isinstance(first_angle.get("original_image"), Image.Image):
+                        original_path = f"results/original_{int(time.time())}.png"
+                        first_angle["original_image"].save(original_path)
+                        image_paths["original"] = original_path
+                    
+                    if use_segmentation and isinstance(first_angle.get("segmented_image"), Image.Image):
+                        segmented_path = f"results/segmented_{int(time.time())}.png"
+                        first_angle["segmented_image"].save(segmented_path)
+                        image_paths["segmented"] = segmented_path
                 
-                # Original image
-                if "original_image_path" in first_angle:
-                    image_paths["original"] = first_angle["original_image_path"]
-                
-                # Segmented image
-                if "segmented_image_path" in first_angle:
-                    image_paths["segmented"] = first_angle["segmented_image_path"]
-                
-                # Visualizations
-                if "visualizations" in first_angle:
-                    for viz_key, viz_path in first_angle["visualizations"].items():
-                        image_paths[viz_key] = viz_path
-                
-                # Save the results
-                result_id = save_user_result(username, save_results, image_paths)
-                
-                st.success(f"✅ Multi-angle analysis results saved successfully! (ID: {result_id})")
-                
-                # Add button to view history
-                if st.button("View Saved Results"):
-                    st.session_state.page = "history"
-                    st.rerun()
+                try:
+                    result_id = save_user_result(username, save_results, image_paths)
+                    st.success(f"✅ Analysis results saved successfully! (ID: {result_id})")
+                    
+                    if st.button("View Saved Results"):
+                        st.session_state.page = "history"
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving results: {str(e)}")
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
 def display_enhanced_patch_based_results(combined_results, system, username):
-    """Display patch-based analysis results with enhanced confidence distributions"""
+    """Display enhanced patch-based results, aligned with display_enhanced_results"""
     if "error" in combined_results and "angle_results" not in combined_results:
         st.error(f"Error: {combined_results['error']}")
         return
@@ -1239,222 +1219,146 @@ def display_enhanced_patch_based_results(combined_results, system, username):
     fruit_type = combined_results.get("fruit_type", "Unknown")
     num_angles = combined_results.get("num_angles", 0)
     
-    st.subheader("📊 Enhanced Patch-Based Analysis")
-    st.info(f"Analyzed {num_angles} angles of the {fruit_type} with detailed confidence distributions")
+    # Header section similar to display_enhanced_results
+    st.header(f"🍎 {fruit_type.title()} Ripeness Analysis")
+    st.write(f"Analyzed {num_angles} angles with enhanced two-stage analysis")
     
-    st.subheader("🍌 Combined Ripeness Analysis")
+    # Main content columns
+    col1, col2 = st.columns(2)
     
-    # Create tabs for each angle
+    with col1:
+        st.subheader("Original Image (Front View)")
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
+    
+    with col2:
+        st.subheader("Segmented Image (Front View)")
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            st.image(combined_results["angle_results"][0]["segmented_image"], use_container_width=True)
+    
+    # Combined ripeness analysis
+    st.subheader("Combined Ripeness Analysis")
+    
+    if "ripeness_predictions" in combined_results and combined_results["ripeness_predictions"]:
+        ripeness_data = {
+            "Ripeness Level": [],
+            "Average Confidence": []
+        }
+        
+        for pred in combined_results["ripeness_predictions"]:
+            ripeness_data["Ripeness Level"].append(pred["ripeness"])
+            ripeness_data["Average Confidence"].append(f"{pred['confidence']:.2f}")
+        
+        st.table(ripeness_data)
+    
+    # Angle-specific tabs
+    st.subheader("Angle-Specific Analysis")
     angle_tabs = st.tabs(combined_results["angle_names"])
     
-    # Process each angle
     for i, (tab, angle_result) in enumerate(zip(angle_tabs, combined_results["angle_results"])):
         with tab:
             angle_name = combined_results["angle_names"][i]
             
-            st.write(f"## {angle_name} View Analysis")
+            # Display images for this angle
+            angle_col1, angle_col2 = st.columns(2)
             
-            # Display original and segmented images
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"**Original {angle_name} View**")
+            with angle_col1:
+                st.subheader(f"Original {angle_name}")
                 st.image(angle_result["original_image"], use_container_width=True)
             
-            with col2:
-                st.write(f"**Segmented {angle_name} View**")
+            with angle_col2:
+                st.subheader(f"Segmented {angle_name}")
                 st.image(angle_result["segmented_image"], use_container_width=True)
             
-            # Display confidence distributions for fruits in this angle
-            if "fruits_data" in angle_result and "confidence_distributions" in angle_result:
-                fruits_data = angle_result["fruits_data"]
-                confidence_distributions = angle_result["confidence_distributions"]
+            # Display confidence distributions for this angle
+            if "confidence_distributions" in angle_result:
+                st.subheader(f"{angle_name} Confidence Distribution")
                 
-                if len(fruits_data) > 1:
+                if len(angle_result["confidence_distributions"]) > 1:
                     # Multiple fruits in this angle
-                    st.write(f"**{len(fruits_data)} fruits detected in {angle_name} view**")
+                    fruit_tabs = st.tabs([f"Fruit #{j+1}" for j in range(len(angle_result["confidence_distributions"]))])
                     
-                    # Create fruit tabs
-                    fruit_tabs = st.tabs([f"Fruit #{j+1}" for j in range(len(fruits_data))])
-                    
-                    for j, (fruit_tab, fruit_data, distribution) in enumerate(zip(
-                        fruit_tabs, fruits_data, confidence_distributions
-                    )):
+                    for j, (fruit_tab, distribution) in enumerate(zip(fruit_tabs, angle_result["confidence_distributions"])):
                         with fruit_tab:
-                            if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
-                                st.write(f"**Fruit #{j+1}**")
-                                fruit_img = Image.open(fruit_data["masked_crop_path"])
-                                st.image(fruit_img, width=300)
-                            
-                            # Display confidence distribution
                             if distribution and "error" not in distribution:
                                 viz_path = visualize_confidence_distribution(
-                                    fruit_data, distribution, fruit_type
+                                    {},  # Pass empty dict since we don't have fruit_data here
+                                    distribution,
+                                    fruit_type
                                 )
                                 viz_img = Image.open(viz_path)
                                 st.image(viz_img, use_container_width=True)
-                            else:
-                                st.warning("No confidence distribution available for this fruit")
                 else:
                     # Single fruit in this angle
-                    fruit_data = fruits_data[0]
-                    distribution = confidence_distributions[0]
-                    
-                    if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
-                        st.write("**Processed Fruit**")
-                        fruit_img = Image.open(fruit_data["masked_crop_path"])
-                        st.image(fruit_img, width=300)
-                    
-                    # Display confidence distribution
+                    distribution = angle_result["confidence_distributions"][0]
                     if distribution and "error" not in distribution:
                         viz_path = visualize_confidence_distribution(
-                            fruit_data, distribution, fruit_type
+                            {},
+                            distribution,
+                            fruit_type
                         )
                         viz_img = Image.open(viz_path)
                         st.image(viz_img, use_container_width=True)
-                        
-                        # Add download link
-                        st.markdown(
-                            get_image_download_link(
-                                viz_img,
-                                f"{angle_name}_ripeness.png",
-                                f"Download {angle_name} Visualization"
-                            ),
-                            unsafe_allow_html=True
-                        )
-                    else:
-                        st.warning("No confidence distribution available for this angle")
-            else:
-                st.warning(f"No fruit data available for {angle_name} view")
     
-    # Comparison across angles
-    st.subheader("📈 Cross-Angle Comparison")
-    
-    # Collect all unique ripeness levels across all angles
-    all_ripeness_levels = set()
-    for angle_result in combined_results["angle_results"]:
-        if "confidence_distributions" in angle_result:
-            for distribution in angle_result["confidence_distributions"]:
-                if distribution and "error" not in distribution:
-                    for level in distribution.keys():
-                        if level not in ["error", "estimated"]:
-                            all_ripeness_levels.add(level)
-    
-    if all_ripeness_levels:
-        ripeness_levels = sorted(list(all_ripeness_levels))
-        angle_names = combined_results["angle_names"]
+    # Technical details - similar to display_enhanced_results
+    with st.expander("Technical Details"):
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            st.write("**Segmentation Mask (Front View):**")
+            st.image(combined_results["angle_results"][0]["mask"] * 255, clamp=True, use_container_width=True)
+            
+            if "mask_metrics" in combined_results["angle_results"][0]:
+                st.write("**Mask Quality Metrics:**")
+                metrics = combined_results["angle_results"][0]["mask_metrics"]
+                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
         
-        # Create comparison chart
-        comparison_data = []
-        
-        for angle_idx, angle_result in enumerate(combined_results["angle_results"]):
-            if "confidence_distributions" not in angle_result:
-                continue
-                
-            # Get first fruit from each angle for comparison
-            if angle_result["confidence_distributions"]:
-                distribution = angle_result["confidence_distributions"][0]
-                if distribution and "error" not in distribution:
-                    angle_data = {"angle": angle_names[angle_idx]}
-                    
-                    for level in ripeness_levels:
-                        angle_data[level] = distribution.get(level, 0)
-                    
-                    comparison_data.append(angle_data)
-        
-        if comparison_data:
-            # Create bar chart
-            fig, ax = plt.subplots(figsize=(12, 6))
-            bar_width = 0.15
-            index = np.arange(len(ripeness_levels))
-            
-            for i, data in enumerate(comparison_data):
-                values = [data.get(level, 0) * 100 for level in ripeness_levels]
-                ax.bar(index + i*bar_width, values, bar_width, label=data["angle"])
-            
-            ax.set_xlabel('Ripeness Level')
-            ax.set_ylabel('Confidence (%)')
-            ax.set_title('Ripeness Confidence by Angle')
-            ax.set_xticks(index + bar_width * (len(comparison_data) - 1) / 2)
-            ax.set_xticklabels(ripeness_levels)
-            ax.set_ylim([0, 100])
-            ax.legend()
-            
-            st.pyplot(fig)
-            
-            # Add table with values
-            st.write("**Confidence Values by Angle (%)**")
-            table_data = {"Ripeness Level": ripeness_levels}
-            
-            for data in comparison_data:
-                angle_name = data["angle"]
-                table_data[angle_name] = [f"{data.get(level, 0)*100:.1f}%" for level in ripeness_levels]
-            
-            st.table(table_data)
-        else:
-            st.warning("Insufficient data for comparison")
-    else:
-        st.warning("No comparable ripeness levels found across angles")
+        st.write("**Model Processing Information:**")
+        st.write(f"- Device used: {system.device}")
+        st.write(f"- Two-Stage Analysis: Enabled")
+        st.write(f"- Segmentation model input size: 256x256")
+        st.write(f"- Classification model input size: 224x224")
     
-    # Save the results
-    st.subheader("Save Results")
-    
+    # Save results section - similar to display_enhanced_results
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
         with save_col1:
-            save_note = st.text_input("Add a note about this enhanced multi-angle analysis (optional)", 
-                                    key="enhanced_patch_note")
+            save_note = st.text_input("Add a note about this analysis (optional)", key="enhanced_patch_note")
         
         with save_col2:
-            save_button = st.button("💾 Save Enhanced Multi-Angle Results", 
-                                  type="primary", 
-                                  key="enhanced_patch_save")
+            save_button = st.button("💾 Save Analysis Results", type="primary", key="enhanced_patch_save")
             
             if save_button:
-                # Prepare results for saving
-                save_results = combined_results.copy()
+                save_results = make_serializable(combined_results)
                 save_results["user_note"] = save_note
                 save_results["analysis_type"] = "enhanced_patch_based"
                 
-                # Save images
                 image_paths = {}
+                timestamp = int(time.time())
                 
-                # Save visualization images from each angle
-                for i, angle_result in enumerate(combined_results["angle_results"]):
-                    angle_name = combined_results["angle_names"][i]
+                # Save representative images from first angle
+                if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+                    first_angle = combined_results["angle_results"][0]
                     
-                    # Save confidence visualizations
-                    if "confidence_distributions" in angle_result:
-                        for j, (fruit_data, distribution) in enumerate(zip(
-                            angle_result.get("fruits_data", []),
-                            angle_result["confidence_distributions"]
-                        )):
-                            if distribution and "error" not in distribution:
-                                viz_path = visualize_confidence_distribution(
-                                    fruit_data, 
-                                    distribution, 
-                                    fruit_type,
-                                    save_path=f"results/{angle_name}_fruit{j}_{int(time.time())}.png"
-                                )
-                                image_paths[f"{angle_name}_fruit{j}_distribution"] = viz_path
+                    if isinstance(first_angle.get("original_image"), Image.Image):
+                        original_path = f"results/original_{timestamp}.png"
+                        first_angle["original_image"].save(original_path)
+                        image_paths["original"] = original_path
                     
-                    # Save original and segmented images from first angle
-                    if i == 0:
-                        if "original_image_path" in angle_result:
-                            image_paths["original"] = angle_result["original_image_path"]
-                        
-                        if "segmented_image_path" in angle_result:
-                            image_paths["segmented"] = angle_result["segmented_image_path"]
+                    if isinstance(first_angle.get("segmented_image"), Image.Image):
+                        segmented_path = f"results/segmented_{timestamp}.png"
+                        first_angle["segmented_image"].save(segmented_path)
+                        image_paths["segmented"] = segmented_path
                 
-                # Save the results
-                result_id = save_user_result(username, save_results, image_paths)
-                
-                st.success(f"✅ Enhanced multi-angle analysis results saved successfully! (ID: {result_id})")
-                
-                # Add button to view history
-                if st.button("View Saved Results", key="enhanced_patch_history"):
-                    st.session_state.page = "history"
-                    st.rerun()
+                try:
+                    result_id = save_enhanced_user_result(username, save_results, image_paths)
+                    st.success(f"✅ Analysis results saved successfully! (ID: {result_id})")
+                    
+                    if st.button("View Saved Results", key="enhanced_patch_history"):
+                        st.session_state.page = "history"
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving results: {str(e)}")
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
@@ -1476,12 +1380,11 @@ def main():
             st.write(f"👋 Welcome, {current_user}!")
             
             st.subheader("Navigation")
-            nav_options = ["Home", "Analysis History", "About", "Evaluation"]
+            nav_options = ["Home", "Analysis History", "About"]
             
             nav_map = {
                 "Home": "home",
                 "Analysis History": "history",
-                "Evaluation": "evaluation",
                 "About": "about"
             }
             
@@ -1821,9 +1724,7 @@ def main():
                         # Create a smaller preview
                         st.image(bottom_file, width=250)
                 
-                # Show analysis button when required images are uploaded
                 if front_file is not None and back_file is not None:
-                    # Store files in session state
                     st.session_state.front_file = front_file
                     st.session_state.back_file = back_file
                     st.session_state.top_file = top_file
@@ -1833,7 +1734,14 @@ def main():
                     st.write("---")
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
-                        st.warning("Please upload both front and back images for patch-based analysis")
+                        if st.button("🔍 Start Multi-Angle Analysis", type="primary", use_container_width=True):
+                            st.session_state.analysis_step = "analyze"
+                            st.session_state.start_analysis = True
+                            st.rerun()
+                else:
+                    # Show message that both front and back images are required
+                    if (front_file is not None or back_file is not None) and not (front_file is not None and back_file is not None):
+                        st.warning("Both front and back images are required for multi-angle analysis")
         
         elif st.session_state.analysis_step == "analyze":
             st.header(f"Analyzing {st.session_state.selected_fruit}")
@@ -1871,7 +1779,7 @@ def main():
                         # Call the enhanced analysis method
                         results = system.analyze_ripeness_enhanced(
                             image_input,
-                            fruit_type=st.session_state.selected_fruit.lower()
+                            fruit_type=st.session_state.selected_fruit.lower(),
                         )
                         
                         progress_bar.progress(100)
