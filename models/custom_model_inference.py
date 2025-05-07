@@ -286,6 +286,13 @@ class CustomModelInference:
             # Inference
             with torch.no_grad():
                 outputs = model(img_tensor)
+                
+                # ===== ADDED: Temperature scaling for mangoes =====
+                if fruit_type == "mango":
+                    temperature = 3.0  # Higher value = more uniform distribution
+                    outputs = outputs / temperature
+                # ================================================
+                
                 probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
             
             # Convert to dictionary
@@ -296,18 +303,47 @@ class CustomModelInference:
                 if i < len(class_names):
                     # Use standardized ripeness labels if possible
                     class_name = class_names[i]
-                    if class_name.lower() in ["unripe", "strawberryunripe", "green"]:
-                        label = "Unripe"
-                    elif class_name.lower() in ["ripe", "strawberryripe", "red"]:
-                        label = "Ripe"
-                    elif class_name.lower() in ["overripe", "rotten", "strawberryrotten"]:
-                        label = "Overripe"
+                    
+                    # ===== MODIFIED: Special handling for mangoes =====
+                    if fruit_type == "mango":
+                        if class_name.lower() in ["unripe", "unripe-1-20-", "early_ripe-21-40-"]:
+                            label = "Unripe"
+                        elif class_name.lower() in ["semiripe", "semi-ripe", "partially_ripe-41-60-", "semi_ripe", "underripe"]:
+                            label = "Underripe"
+                        elif class_name.lower() in ["ripe", "ripe-61-80-", "fully ripe"]:
+                            label = "Ripe"
+                        elif class_name.lower() in ["overripe", "over_ripe-81-100-", "over-ripe", "perished", "rotten"]:
+                            label = "Overripe"
+                        else:
+                            label = class_name
                     else:
-                        label = class_name
+                        # Original code for other fruits
+                        if class_name.lower() in ["unripe", "strawberryunripe", "green"]:
+                            label = "Unripe"
+                        elif class_name.lower() in ["ripe", "strawberryripe", "red"]:
+                            label = "Ripe"
+                        elif class_name.lower() in ["overripe", "rotten", "strawberryrotten"]:
+                            label = "Overripe"
+                        else:
+                            label = class_name
+                    # ================================================
                     
                     confidences[label] = prob.item()
                 else:
                     confidences[f"Class_{i}"] = prob.item()
+            
+            # ===== ADDED: Post-processing for mangoes =====
+            if fruit_type == "mango":
+                # Ensure minimum probability values
+                for key in confidences:
+                    confidences[key] = max(confidences[key], 0.02)
+                
+                # Renormalize
+                total = sum(confidences.values())
+                if total > 0:
+                    for key in confidences:
+                        confidences[key] /= total
+            # ===============================================
             
             return confidences
             
