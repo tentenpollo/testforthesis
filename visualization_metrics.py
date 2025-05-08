@@ -146,16 +146,12 @@ def generate_comparison_visualization(baseline_model, enhanced_model, key_layers
     
     for layer_name, (baseline_key, enhanced_key) in key_layers.items():
         try:
-            print(f"Processing layer: {layer_name}")
             
             # Safely check if activations exist
             has_baseline = (hasattr(baseline_model, 'activations') and 
                             baseline_key in baseline_model.activations)
             has_enhanced = (hasattr(enhanced_model, 'activations') and 
                            enhanced_key in enhanced_model.activations)
-            
-            print(f"  Baseline activation exists: {has_baseline}")
-            print(f"  Enhanced activation exists: {has_enhanced}")
             
             # Only proceed if we have at least one activation
             if has_baseline or has_enhanced:
@@ -165,7 +161,6 @@ def generate_comparison_visualization(baseline_model, enhanced_model, key_layers
                 # Process baseline activation
                 if has_baseline:
                     baseline_activation = baseline_model.activations[baseline_key]
-                    print(f"  Baseline activation shape: {baseline_activation.shape}")
                     
                     # Ensure activation is valid for visualization
                     if baseline_activation.ndim >= 3 and baseline_activation.shape[1] > 0:
@@ -197,7 +192,6 @@ def generate_comparison_visualization(baseline_model, enhanced_model, key_layers
                 # Process enhanced activation
                 if has_enhanced:
                     enhanced_activation = enhanced_model.activations[enhanced_key]
-                    print(f"  Enhanced activation shape: {enhanced_activation.shape}")
                     
                     # Ensure activation is valid for visualization
                     if enhanced_activation.ndim >= 3 and enhanced_activation.shape[1] > 0:
@@ -236,7 +230,6 @@ def generate_comparison_visualization(baseline_model, enhanced_model, key_layers
                 try:
                     vis_img = Image.open(buf)
                     visualizations[layer_name] = vis_img
-                    print(f"  Successfully created visualization for {layer_name}")
                 except Exception as e:
                     print(f"  Error creating image from buffer: {str(e)}")
                 

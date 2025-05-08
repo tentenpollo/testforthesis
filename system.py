@@ -364,16 +364,6 @@ class FruitRipenessSystem:
             visualize_regularization_impact_comparison, feature_map_visualization
         )
         
-        print("==== KEY COMPARISON LAYERS CHECK ====")
-        print(f"key_comparison_layers: {self.key_comparison_layers}")
-
-        # Check each layer key
-        for layer_name, (baseline_key, enhanced_key) in self.key_comparison_layers.items():
-            baseline_has_key = baseline_key in self.baseline_model.activations
-            enhanced_has_key = enhanced_key in self.seg_model.activations
-            
-            print(f"Layer '{layer_name}': Baseline key '{baseline_key}' exists: {baseline_has_key}, Enhanced key '{enhanced_key}' exists: {enhanced_has_key}")
-        
         comparison_metrics = compare_model_metrics(
             self.baseline_model, self.seg_model, self.key_comparison_layers
         )

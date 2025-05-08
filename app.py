@@ -980,12 +980,10 @@ def display_enhanced_results(results, system, username):
                 st.write("No feature map visualizations available")
 
         with tab2:
-            # Get layer visualizations - FIXED PART
             layer_vis = None
             layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
-                         "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
-            
-            # First check in results["visualizations"] (merged at the start of this function)
+                        "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
+                
             if "visualizations" in results:
                 vis_keys = [k for k in results["visualizations"].keys() if k in layer_keys]
                 if vis_keys:
@@ -997,15 +995,145 @@ def display_enhanced_results(results, system, username):
                 if vis_keys:
                     layer_vis = results["segmentation_results"]["visualizations"]
                     
+            if comparison and "layer_metrics" in comparison:
+                st.subheader("Layer Metrics Comparison")
+                
+                # Define the layer order (encoder to decoder)
+                layer_order = [
+                    "Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                    "Bottleneck", 
+                    "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"
+                ]
+                
+                # Filter and sort layers based on the defined order
+                available_layers = []
+                for layer in layer_order:
+                    if layer in comparison["layer_metrics"]:
+                        available_layers.append(layer)
+                
+                # Create 3 separate tables - one for each metric type
+                st.markdown("### Standard Deviation")
+                std_table = {
+                    "Layer": available_layers,
+                    "Base U-Net": [],
+                    "SPEAR-UNet": [],
+                    "Improvement": []
+                }
+                
+                for layer in available_layers:
+                    layer_metric = comparison["layer_metrics"][layer]
+                    # Add Standard Deviation
+                    base_std = layer_metric['baseline']['std_activation']
+                    spear_std = layer_metric['enhanced']['std_activation']
+                    std_improvement = ((spear_std - base_std) / abs(base_std + 1e-8)) * 100
+                    
+                    std_table["Base U-Net"].append(f"{base_std:.4f}")
+                    std_table["SPEAR-UNet"].append(f"{spear_std:.4f}")
+                    
+                    # Add improvement with arrow indicators
+                    if std_improvement > 0:
+                        std_table["Improvement"].append(f"↑ {std_improvement:.1f}%")
+                    else:
+                        std_table["Improvement"].append(f"↓ {std_improvement:.1f}%")
+                
+                st.table(std_table)
+                
+                st.markdown("### Feature Entropy")
+                entropy_table = {
+                    "Layer": available_layers,
+                    "Base U-Net": [],
+                    "SPEAR-UNet": [],
+                    "Improvement": []
+                }
+                
+                for layer in available_layers:
+                    layer_metric = comparison["layer_metrics"][layer]
+                    # Add Feature Entropy
+                    base_entropy = layer_metric['baseline']['entropy']
+                    spear_entropy = layer_metric['enhanced']['entropy']
+                    entropy_improvement = layer_metric['entropy_improvement']
+                    
+                    entropy_table["Base U-Net"].append(f"{base_entropy:.4f}")
+                    entropy_table["SPEAR-UNet"].append(f"{spear_entropy:.4f}")
+                    
+                    # Add improvement with arrow indicators
+                    if entropy_improvement > 0:
+                        entropy_table["Improvement"].append(f"↑ {entropy_improvement:.1f}%")
+                    else:
+                        entropy_table["Improvement"].append(f"↓ {entropy_improvement:.1f}%")
+                
+                st.table(entropy_table)
+                
+                st.markdown("### Mean Activation")
+                mean_table = {
+                    "Layer": available_layers,
+                    "Base U-Net": [],
+                    "SPEAR-UNet": [],
+                    "Improvement": []
+                }
+                
+                for layer in available_layers:
+                    layer_metric = comparison["layer_metrics"][layer]
+                    # Add Mean Activation
+                    base_mean = layer_metric['baseline']['mean_activation']
+                    spear_mean = layer_metric['enhanced']['mean_activation']
+                    mean_improvement = ((spear_mean - base_mean) / abs(base_mean + 1e-8)) * 100
+                    
+                    mean_table["Base U-Net"].append(f"{base_mean:.4f}")
+                    mean_table["SPEAR-UNet"].append(f"{spear_mean:.4f}")
+                    
+                    # Add improvement with arrow indicators
+                    if mean_improvement > 0:
+                        mean_table["Improvement"].append(f"↑ {mean_improvement:.1f}%")
+                    else:
+                        mean_table["Improvement"].append(f"↓ {mean_improvement:.1f}%")
+                
+                st.table(mean_table)
+                
+                # Calculate overall average improvements
+                avg_std_improvement = sum([((comparison["layer_metrics"][layer]['enhanced']['std_activation'] - 
+                                        comparison["layer_metrics"][layer]['baseline']['std_activation']) / 
+                                        abs(comparison["layer_metrics"][layer]['baseline']['std_activation'] + 1e-8)) * 100 
+                                    for layer in available_layers]) / len(available_layers)
+                
+                avg_entropy_improvement = sum([comparison["layer_metrics"][layer]['entropy_improvement'] 
+                                            for layer in available_layers]) / len(available_layers)
+                
+                avg_mean_improvement = sum([((comparison["layer_metrics"][layer]['enhanced']['mean_activation'] - 
+                                        comparison["layer_metrics"][layer]['baseline']['mean_activation']) / 
+                                        abs(comparison["layer_metrics"][layer]['baseline']['mean_activation'] + 1e-8)) * 100 
+                                        for layer in available_layers]) / len(available_layers)
+                
+                # Show average improvements
+                st.markdown("### Overall Average Improvements")
+                avg_table = {
+                    "Metric": ["Standard Deviation", "Feature Entropy", "Mean Activation"],
+                    "Average Improvement": [
+                        f"{avg_std_improvement:.1f}%" if avg_std_improvement > 0 else f"{avg_std_improvement:.1f}%",
+                        f"{avg_entropy_improvement:.1f}%" if avg_entropy_improvement > 0 else f"{avg_entropy_improvement:.1f}%",
+                        f"{avg_mean_improvement:.1f}%" if avg_mean_improvement > 0 else f"{avg_mean_improvement:.1f}%"
+                    ]
+                }
+                st.table(avg_table)
+                
+                st.markdown("**What do these metrics mean?**")
+                st.markdown("""
+                - **Standard Deviation**: Measures the variability of activations. Higher values in SPEAR-UNet indicate better feature discrimination.
+                - **Feature Entropy**: Quantifies information content in the feature maps. Higher entropy in SPEAR-UNet demonstrates improved information capture.
+                - **Mean Activation**: Average activation level. Differences show how ResNet integration affects feature response.
+                - **Improvement**: Percentage improvement of SPEAR-UNet over Base U-Net. Positive values indicate better performance.
+                """)
+                    
             # If we found layer visualizations, display them
             if layer_vis:
                 vis_keys = [k for k in layer_vis.keys() if k in layer_keys]
                 if vis_keys:
+                    st.subheader("Layer Visualizations")
                     for key in vis_keys:
                         st.write(f"**{key} Layer Comparison:**")
                         st.image(layer_vis[key], use_container_width=True)
                         
-                        # Add metrics table for this layer if available
+                        # Add metrics table for this layer if available (keeping individual metrics with the visualizations)
                         if comparison and "layer_metrics" in comparison and key in comparison["layer_metrics"]:
                             layer_metric = comparison["layer_metrics"][key]
                             
