@@ -232,7 +232,7 @@ class FruitRipenessSystem:
         self.fruit_to_model = {
             "tomato": "tomates_4_classe/1",
             "pineapple": "pineapple-maturity-project-app/1",
-            "banana": "banana-project/2",
+            "banana": "aoop/3",
             "strawberry": "strawberry-ml-detection-02/1",
             "mango": "mango-detection-goiq9/1",
         }
@@ -456,11 +456,6 @@ class FruitRipenessSystem:
             enhanced_perimeter = sum(cv2.arcLength(cnt, True) for cnt in enhanced_contours)
             enhanced_area = sum(cv2.contourArea(cnt) for cnt in enhanced_contours)
             enhanced_complexity = enhanced_perimeter**2 / (4 * np.pi * enhanced_area) if enhanced_area > 0 else 0
-        
-        # DEBUGGING: Check what visualizations we have before returning
-        print("\n=== SEGMENT_FRUIT_WITH_METRICS DEBUG ===")
-        print(f"Visualization keys before return: {list(visualizations.keys())}")
-        print(f"Feature visualization keys before return: {list(feature_visualizations.keys())}")
         
         # Create the result dictionary for debugging
         result_dict = {
