@@ -250,7 +250,7 @@ class FruitRipenessSystem:
 
         self.roboflow_client = InferenceHTTPClient(
             api_url="https://detect.roboflow.com",
-            api_key="f3eWrtQ6s0nOcRvUxKHd",
+            api_key="UNykbkEetYICFkzzjcqP",
         )
         
         self.classification_config = InferenceConfiguration(
@@ -299,6 +299,16 @@ class FruitRipenessSystem:
         # Import the adapter function for handling channel differences
         from models.baseline_unet import adapt_input_channels
         
+        # Clear any existing activations
+        if hasattr(self.seg_model, 'activations'):
+            self.seg_model.activations.clear()
+        if hasattr(self.baseline_model, 'activations'):
+            self.baseline_model.activations.clear()
+        
+        print("==== PRE-FORWARD ACTIVATIONS CHECK ====")
+        print(f"SPEAR-UNet activations before forward: {list(self.seg_model.activations.keys())}")
+        print(f"Baseline U-Net activations before forward: {list(self.baseline_model.activations.keys())}")
+        
         # Track inference time for both models
         start_baseline = time.time()
         with torch.no_grad():
@@ -315,6 +325,10 @@ class FruitRipenessSystem:
             enhanced_mask = torch.sigmoid(enhanced_output) > 0.5
             enhanced_mask = enhanced_mask.squeeze().cpu().numpy().astype(np.uint8)
         enhanced_time = time.time() - start_enhanced
+        
+        print("==== POST-FORWARD ACTIVATIONS CHECK ====")
+        print(f"SPEAR-UNet activations after forward: {list(self.seg_model.activations.keys())}")
+        print(f"Baseline U-Net activations after forward: {list(self.baseline_model.activations.keys())}")
         
         # Resize masks back to original image size
         baseline_mask = cv2.resize(baseline_mask, (original_size[0], original_size[1]), interpolation=cv2.INTER_NEAREST)
@@ -350,14 +364,34 @@ class FruitRipenessSystem:
             visualize_regularization_impact_comparison, feature_map_visualization
         )
         
+        print("==== KEY COMPARISON LAYERS CHECK ====")
+        print(f"key_comparison_layers: {self.key_comparison_layers}")
+
+        # Check each layer key
+        for layer_name, (baseline_key, enhanced_key) in self.key_comparison_layers.items():
+            baseline_has_key = baseline_key in self.baseline_model.activations
+            enhanced_has_key = enhanced_key in self.seg_model.activations
+            
+            print(f"Layer '{layer_name}': Baseline key '{baseline_key}' exists: {baseline_has_key}, Enhanced key '{enhanced_key}' exists: {enhanced_has_key}")
+        
         comparison_metrics = compare_model_metrics(
             self.baseline_model, self.seg_model, self.key_comparison_layers
         )
         
-        # Generate visualizations
-        visualizations = generate_comparison_visualization(
-            self.baseline_model, self.seg_model, self.key_comparison_layers
-        )
+        # Generate visualizations with detailed error handling and debugging
+        print("==== GENERATING VISUALIZATIONS ====")
+        visualizations = {}
+        
+        try:
+            visualizations = generate_comparison_visualization(
+                self.baseline_model, self.seg_model, self.key_comparison_layers
+            )
+            print(f"Generated visualizations keys: {list(visualizations.keys())}")
+        except Exception as e:
+            import traceback
+            print(f"⚠️ Error generating visualizations: {str(e)}")
+            print(traceback.format_exc())
+            visualizations = {}  # Ensure we have an empty dict instead of None
         
         # Try to generate regularization comparison, but handle failure gracefully
         reg_comparison_visualization = None
@@ -432,6 +466,40 @@ class FruitRipenessSystem:
             enhanced_perimeter = sum(cv2.arcLength(cnt, True) for cnt in enhanced_contours)
             enhanced_area = sum(cv2.contourArea(cnt) for cnt in enhanced_contours)
             enhanced_complexity = enhanced_perimeter**2 / (4 * np.pi * enhanced_area) if enhanced_area > 0 else 0
+        
+        # DEBUGGING: Check what visualizations we have before returning
+        print("\n=== SEGMENT_FRUIT_WITH_METRICS DEBUG ===")
+        print(f"Visualization keys before return: {list(visualizations.keys())}")
+        print(f"Feature visualization keys before return: {list(feature_visualizations.keys())}")
+        
+        # Create the result dictionary for debugging
+        result_dict = {
+            "original_image": img,
+            "segmented_image": enhanced_img,
+            "mask": enhanced_mask,
+            "segmented_image_path": segmented_path,
+            "comparison_metrics": {
+                "baseline_time": baseline_time,
+                "enhanced_time": enhanced_time,
+                "speedup": baseline_time / enhanced_time if enhanced_time > 0 else 0,
+                "baseline_mask": baseline_mask,
+                "baseline_segmented_image": baseline_img,
+                "iou": iou,
+                "baseline_coverage": baseline_coverage,
+                "enhanced_coverage": enhanced_coverage,
+                "baseline_complexity": baseline_complexity,
+                "enhanced_complexity": enhanced_complexity,
+                "layer_metrics": comparison_metrics
+            },
+            "visualizations": visualizations,
+            "feature_maps": feature_visualizations,
+            "regularization_comparison_viz": reg_comparison_visualization,
+            "mask_metrics": get_mask_quality_metrics(enhanced_mask),
+            "refine_segmentation": refine_segmentation,
+            "refinement_method": refinement_method
+        }
+        
+        print(f"Visualization keys in result_dict: {list(result_dict['visualizations'].keys())}")
         
         # Return all results with metrics
         return {
@@ -559,7 +627,14 @@ class FruitRipenessSystem:
                 refinement_method=refinement_method
             )
             
-            # Extract key components from results
+            print("\n=== PROCESS_IMAGE_WITH_VISUALIZATION DEBUG ===")
+            print(f"Segmentation results keys: {list(segmentation_results.keys())}")
+            if "visualizations" in segmentation_results:
+                print(f"Layer visualizations from segmentation: {list(segmentation_results['visualizations'].keys())}")
+            else:
+                print("No 'visualizations' key in segmentation_results")
+
+            print(f"Result keys before adding visualizations: {list(result.keys())}")
             original_img = segmentation_results["original_image"]
             segmented_img = segmentation_results["segmented_image"]
             mask = segmentation_results["mask"]
@@ -584,7 +659,7 @@ class FruitRipenessSystem:
                 # Format the results
                 formatted_results = self.format_ripeness_results(fruit_type, predictions)
                 
-                # Create result dictionary with only essential fields
+                # Create base result dictionary with essential fields
                 result = {
                     "fruit_type": fruit_type,
                     "classification_confidence": 1.0,  # Using 1.0 as confidence since user-selected
@@ -600,37 +675,100 @@ class FruitRipenessSystem:
                     "refinement_method": refinement_method
                 }
                 
+                # Add angle name if provided
                 if angle_name:
                     result["angle_name"] = angle_name
+                    
+                print("\n=== RESULT CREATION DEBUG ===")
+                print(f"Result keys before adding segmentation data: {list(result.keys())}")
+                
+                # CRITICAL FIX: Initialize visualizations with layer visualizations from segmentation
+                if "visualizations" in segmentation_results:
+                    # Create the visualizations dict in results
+                    result["visualizations"] = {}
+                    
+                    # Copy all layer visualizations
+                    for vis_key, vis_value in segmentation_results["visualizations"].items():
+                        result["visualizations"][vis_key] = vis_value
+                        
+                    print(f"Copied layer visualizations to result: {list(result['visualizations'].keys())}")
+                else:
+                    print("WARNING: No visualizations found in segmentation_results!")
                 
                 # Add comparison metrics if available
                 if "comparison_metrics" in segmentation_results:
                     result["comparison_metrics"] = segmentation_results["comparison_metrics"]
-                
-                # Add visualizations if available
-                if "visualizations" in segmentation_results:
-                    result["visualizations"] = segmentation_results["visualizations"]
+                    print("Added comparison_metrics to result")
                 
                 # Add feature maps if available
                 if "feature_maps" in segmentation_results:
                     result["feature_maps"] = segmentation_results["feature_maps"]
+                    print(f"Added feature_maps to result: {list(segmentation_results['feature_maps'].keys())}")
                 
                 # Add regularization comparison visualization if available
                 if "regularization_comparison_viz" in segmentation_results:
                     result["regularization_comparison_viz"] = segmentation_results["regularization_comparison_viz"]
+                    print("Added regularization_comparison_viz to result")
                 
+                # Before calling visualize_results, check what visualizations we have
+                if "visualizations" in result:
+                    print(f"Visualizations before ripeness visualizations: {list(result['visualizations'].keys())}")
+                else:
+                    print("No visualizations in result before ripeness visualizations")
+                    # Ensure visualizations dict exists
+                    result["visualizations"] = {}
+                    
                 # Create ripeness visualizations
                 try:
                     vis_results = self.visualize_results(result)
-                    if "visualizations" not in result:
-                        result["visualizations"] = {}
-                    result["visualizations"].update(vis_results)
+                    print(f"Ripeness visualization keys from visualize_results: {list(vis_results.keys())}")
+                    
+                    # Store original layer visualization keys so we can verify they're preserved
+                    original_vis_keys = list(result["visualizations"].keys())
+                    print(f"Original visualization keys before adding ripeness vis: {original_vis_keys}")
+                    
+                    # Add new visualizations, preserving existing ones
+                    for vis_key, vis_value in vis_results.items():
+                        result["visualizations"][vis_key] = vis_value
+                    
+                    # Verify layer visualizations are still present
+                    layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                                "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
+                    preserved_layer_keys = [k for k in result["visualizations"].keys() if k in layer_keys]
+                    
+                    print(f"Final visualization keys: {list(result['visualizations'].keys())}")
+                    print(f"Layer visualizations preserved: {preserved_layer_keys}")
+                    
+                    # If layer visualizations were lost, add them back
+                    if not preserved_layer_keys and "visualizations" in segmentation_results:
+                        print("WARNING: Layer visualizations were lost! Adding them back...")
+                        for vis_key, vis_value in segmentation_results["visualizations"].items():
+                            if vis_key in layer_keys:
+                                result["visualizations"][vis_key] = vis_value
+                        
+                        print(f"Restored visualization keys: {list(result['visualizations'].keys())}")
+                    
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
+                    print(f"Error in visualize_results: {str(e)}")
                     result["visualization_error"] = str(e)
                 
+                # Final check of results
+                print(f"=== FINAL RESULT CHECK ===")
+                print(f"Final result keys: {list(result.keys())}")
+                if "visualizations" in result:
+                    all_vis_keys = list(result["visualizations"].keys())
+                    print(f"Final visualization keys: {all_vis_keys}")
+                    
+                    # Check specifically for layer visualizations
+                    layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                                "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
+                    final_layer_keys = [k for k in all_vis_keys if k in layer_keys]
+                    print(f"Final layer visualization keys: {final_layer_keys}")
+                
                 return result
+                
             else:
                 # Handle case with no predictions - same structure as above
                 result = {
@@ -651,13 +789,29 @@ class FruitRipenessSystem:
                 if angle_name:
                     result["angle_name"] = angle_name
                 
+                # CRITICAL FIX: Initialize visualizations with layer visualizations from segmentation
+                if "visualizations" in segmentation_results:
+                    # Create the visualizations dict in results
+                    result["visualizations"] = {}
+                    
+                    # Copy all layer visualizations
+                    for vis_key, vis_value in segmentation_results["visualizations"].items():
+                        result["visualizations"][vis_key] = vis_value
+                        
+                    print(f"Copied layer visualizations to result (no predictions case): {list(result['visualizations'].keys())}")
+                
                 # Add comparison metrics if available
                 if "comparison_metrics" in segmentation_results:
                     result["comparison_metrics"] = segmentation_results["comparison_metrics"]
                 
                 # Add visualizations if available
                 if "visualizations" in segmentation_results:
-                    result["visualizations"] = segmentation_results["visualizations"]
+                    if "visualizations" not in result:
+                        result["visualizations"] = {}
+                    
+                    # Copy all visualizations
+                    for vis_key, vis_value in segmentation_results["visualizations"].items():
+                        result["visualizations"][vis_key] = vis_value
                 
                 # Add feature maps if available
                 if "feature_maps" in segmentation_results:
@@ -667,17 +821,39 @@ class FruitRipenessSystem:
                 if "regularization_comparison_viz" in segmentation_results:
                     result["regularization_comparison_viz"] = segmentation_results["regularization_comparison_viz"]
                 
-                # Create visualizations anyway
+                # Create ripeness visualizations anyway
                 try:
                     vis_results = self.visualize_results(result)
+                    
+                    # Store existing visualization keys
+                    existing_keys = list(result.get("visualizations", {}).keys())
+                    
+                    # Ensure visualizations dict exists
                     if "visualizations" not in result:
                         result["visualizations"] = {}
-                    result["visualizations"].update(vis_results)
+                    
+                    # Add new visualizations, preserving existing ones
+                    for vis_key, vis_value in vis_results.items():
+                        result["visualizations"][vis_key] = vis_value
+                    
+                    # Check if layer visualizations were preserved
+                    layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                                "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
+                    preserved_layer_keys = [k for k in existing_keys if k in layer_keys and k in result["visualizations"]]
+                    
+                    # If layer visualizations were lost, add them back
+                    if any(k in layer_keys for k in existing_keys) and not preserved_layer_keys:
+                        print("WARNING: Layer visualizations were lost! Adding them back...")
+                        for vis_key, vis_value in segmentation_results["visualizations"].items():
+                            if vis_key in layer_keys:
+                                result["visualizations"][vis_key] = vis_value
+                    
                 except Exception as e:
+                    print(f"Error in visualize_results (no predictions): {str(e)}")
                     result["visualization_error"] = str(e)
                 
                 return result
-                    
+                        
         except Exception as e:
             import traceback
             traceback.print_exc()

@@ -124,64 +124,150 @@ def compare_model_metrics(baseline_model, enhanced_model, key_layers):
     return metrics
 
 def generate_comparison_visualization(baseline_model, enhanced_model, key_layers):
-    """Generate visualizations comparing baseline and enhanced models"""
+    """
+    Generate visualizations comparing baseline and enhanced models.
+    
+    Args:
+        baseline_model: The baseline U-Net model
+        enhanced_model: The enhanced SPEAR-UNet model
+        key_layers: Dictionary mapping layer names to (baseline_key, enhanced_key) tuples
+        
+    Returns:
+        Dictionary of PIL Images with layer-by-layer visualizations
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import io
+    from PIL import Image
+    
     visualizations = {}
     
-    for layer_name, (baseline_key, enhanced_key) in key_layers.items():
-        # Safely get activations
-        baseline_activation = None
-        enhanced_activation = None
-        
-        if hasattr(baseline_model, 'activations'):
-            baseline_activation = baseline_model.activations.get(baseline_key)
-        
-        if hasattr(enhanced_model, 'activations'):
-            enhanced_activation = enhanced_model.activations.get(enhanced_key)
-        
-        # Only create visualization if we have at least one of the activations
-        if baseline_activation is not None or enhanced_activation is not None:
-            # Create side-by-side visualization
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-            
-            # Handle case where one activation might be None
-            if baseline_activation is not None:
-                feature_idx = min(4, baseline_activation.shape[1]-1) if baseline_activation.shape[1] > 4 else 0
-                baseline_feature = baseline_activation[0, feature_idx].cpu().numpy()
-                baseline_feature = (baseline_feature - baseline_feature.min()) / (baseline_feature.max() - baseline_feature.min() + 1e-8)
-                im1 = ax1.imshow(baseline_feature, cmap='viridis')
-                plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
-            else:
-                ax1.text(0.5, 0.5, 'No data', ha='center', va='center')
-                ax1.set_facecolor('#f0f0f0')
-            
-            ax1.set_title(f'Baseline U-Net\n{layer_name}')
-            ax1.axis('off')
-            
-            if enhanced_activation is not None:
-                feature_idx = min(4, enhanced_activation.shape[1]-1) if enhanced_activation.shape[1] > 4 else 0
-                enhanced_feature = enhanced_activation[0, feature_idx].cpu().numpy()
-                enhanced_feature = (enhanced_feature - enhanced_feature.min()) / (enhanced_feature.max() - enhanced_feature.min() + 1e-8)
-                im2 = ax2.imshow(enhanced_feature, cmap='viridis')
-                plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
-            else:
-                ax2.text(0.5, 0.5, 'No data', ha='center', va='center')
-                ax2.set_facecolor('#f0f0f0')
-            
-            ax2.set_title(f'SPEAR-UNet\n{layer_name}')
-            ax2.axis('off')
-            
-            plt.tight_layout()
-            
-            # Convert to PIL image
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', bbox_inches='tight')
-            buf.seek(0)
-            visualizations[layer_name] = Image.open(buf)
-            
-            # Close figure to avoid memory leak
-            plt.close(fig)
+    print(f"Starting visualization generation for {len(key_layers)} layers")
     
-    return visualizations   
+    for layer_name, (baseline_key, enhanced_key) in key_layers.items():
+        try:
+            print(f"Processing layer: {layer_name}")
+            
+            # Safely check if activations exist
+            has_baseline = (hasattr(baseline_model, 'activations') and 
+                            baseline_key in baseline_model.activations)
+            has_enhanced = (hasattr(enhanced_model, 'activations') and 
+                           enhanced_key in enhanced_model.activations)
+            
+            print(f"  Baseline activation exists: {has_baseline}")
+            print(f"  Enhanced activation exists: {has_enhanced}")
+            
+            # Only proceed if we have at least one activation
+            if has_baseline or has_enhanced:
+                # Create side-by-side visualization
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+                
+                # Process baseline activation
+                if has_baseline:
+                    baseline_activation = baseline_model.activations[baseline_key]
+                    print(f"  Baseline activation shape: {baseline_activation.shape}")
+                    
+                    # Ensure activation is valid for visualization
+                    if baseline_activation.ndim >= 3 and baseline_activation.shape[1] > 0:
+                        # Select a feature map to visualize (middle channel or 4th channel)
+                        feature_idx = min(4, baseline_activation.shape[1]-1)
+                        baseline_feature = baseline_activation[0, feature_idx].cpu().numpy()
+                        
+                        # Normalize for visualization
+                        min_val = baseline_feature.min()
+                        max_val = baseline_feature.max()
+                        if max_val > min_val:  # Avoid division by zero
+                            baseline_feature = (baseline_feature - min_val) / (max_val - min_val)
+                        
+                        # Plot the feature map
+                        im1 = ax1.imshow(baseline_feature, cmap='viridis')
+                        plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+                    else:
+                        print(f"  Baseline activation not suitable for visualization")
+                        ax1.text(0.5, 0.5, 'Invalid activation format', ha='center', va='center')
+                        ax1.set_facecolor('#f0f0f0')
+                else:
+                    print(f"  No baseline activation found")
+                    ax1.text(0.5, 0.5, 'No activation data', ha='center', va='center')
+                    ax1.set_facecolor('#f0f0f0')
+                
+                ax1.set_title(f'Baseline U-Net\n{layer_name}')
+                ax1.axis('off')
+                
+                # Process enhanced activation
+                if has_enhanced:
+                    enhanced_activation = enhanced_model.activations[enhanced_key]
+                    print(f"  Enhanced activation shape: {enhanced_activation.shape}")
+                    
+                    # Ensure activation is valid for visualization
+                    if enhanced_activation.ndim >= 3 and enhanced_activation.shape[1] > 0:
+                        # Select a feature map to visualize (same index as baseline for comparison)
+                        feature_idx = min(4, enhanced_activation.shape[1]-1)
+                        enhanced_feature = enhanced_activation[0, feature_idx].cpu().numpy()
+                        
+                        # Normalize for visualization
+                        min_val = enhanced_feature.min()
+                        max_val = enhanced_feature.max()
+                        if max_val > min_val:  # Avoid division by zero
+                            enhanced_feature = (enhanced_feature - min_val) / (max_val - min_val)
+                        
+                        # Plot the feature map
+                        im2 = ax2.imshow(enhanced_feature, cmap='viridis')
+                        plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+                    else:
+                        print(f"  Enhanced activation not suitable for visualization")
+                        ax2.text(0.5, 0.5, 'Invalid activation format', ha='center', va='center')
+                        ax2.set_facecolor('#f0f0f0')
+                else:
+                    print(f"  No enhanced activation found")
+                    ax2.text(0.5, 0.5, 'No activation data', ha='center', va='center')
+                    ax2.set_facecolor('#f0f0f0')
+                
+                ax2.set_title(f'SPEAR-UNet\n{layer_name}')
+                ax2.axis('off')
+                
+                # Adjust layout and save to buffer
+                plt.tight_layout()
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', bbox_inches='tight')
+                buf.seek(0)
+                
+                # Load the image from buffer and add to visualizations dict
+                try:
+                    vis_img = Image.open(buf)
+                    visualizations[layer_name] = vis_img
+                    print(f"  Successfully created visualization for {layer_name}")
+                except Exception as e:
+                    print(f"  Error creating image from buffer: {str(e)}")
+                
+                # Close figure to prevent memory leak
+                plt.close(fig)
+            else:
+                print(f"  Skipping layer {layer_name} - no activations found")
+        
+        except Exception as e:
+            import traceback
+            print(f"Error processing layer {layer_name}: {str(e)}")
+            print(traceback.format_exc())
+            
+            # Create an error image
+            try:
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.text(0.5, 0.5, f"Error visualizing {layer_name}:\n{str(e)}", 
+                        ha='center', va='center', wrap=True)
+                ax.axis('off')
+                
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', bbox_inches='tight')
+                buf.seek(0)
+                
+                visualizations[layer_name] = Image.open(buf)
+                plt.close(fig)
+            except:
+                print(f"  Failed to create error image for {layer_name}")
+    
+    print(f"Visualization generation complete. Created {len(visualizations)} visualizations")
+    return visualizations
 
 def visualize_regularization_impact_comparison(enhanced_model, training_metrics=None, save_path=None):
     """

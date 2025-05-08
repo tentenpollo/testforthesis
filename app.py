@@ -673,6 +673,28 @@ def display_enhanced_results(results, system, username):
         st.error(f"Error: {results['error']}")
         return
     
+    # Merge layer visualizations to make them available
+    if ("visualizations" in results and 
+        "segmentation_results" in results and 
+        "visualizations" in results["segmentation_results"]):
+        
+        # Define layer visualization keys
+        layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                      "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
+        
+        # Copy layer visualizations to the main visualizations dict
+        for key in layer_keys:
+            if key in results["segmentation_results"]["visualizations"]:
+                results["visualizations"][key] = results["segmentation_results"]["visualizations"][key]
+                
+        print(f"Merged layer visualizations. Updated keys: {list(results['visualizations'].keys())}")
+    
+    print("==== DISPLAY FUNCTION VISUALIZATIONS CHECK ====")
+    if "visualizations" in results:
+        print(f"Visualizations keys in results: {list(results['visualizations'].keys())}")
+    else:
+        print("No 'visualizations' key in results dictionary")
+        
     use_segmentation = results.get("use_segmentation", True)
     fruit_type = results.get("fruit_type", "Unknown")
     num_fruits = results.get("num_fruits", 0)
@@ -939,103 +961,111 @@ def display_enhanced_results(results, system, username):
                 st.write("SPEAR-UNet Result")
                 st.image(results["segmented_image"], use_container_width=True)
         
-        # Get feature maps
-        feature_maps = None
-        if "feature_maps" in results:
-            feature_maps = results["feature_maps"]
-        elif "segmentation_results" in results and "feature_maps" in results["segmentation_results"]:
-            feature_maps = results["segmentation_results"]["feature_maps"]
+        # Create tabs for different visualization types
+        tab1, tab2, tab3 = st.tabs(["Feature Maps", "Layer-by-Layer Comparison", "Regularization"])
             
-        # Get visualizations
-        visualizations = None
-        if "visualizations" in results:
-            visualizations = results["visualizations"]
-        elif "segmentation_results" in results and "visualizations" in results["segmentation_results"]:
-            visualizations = results["segmentation_results"]["visualizations"]
-            
-        # Get regularization visualization
-        reg_viz = None
-        if "regularization_comparison_viz" in results:
-            reg_viz = results["regularization_comparison_viz"]
-        elif "segmentation_results" in results and "regularization_comparison_viz" in results["segmentation_results"]:
-            reg_viz = results["segmentation_results"]["regularization_comparison_viz"]
+        with tab1:
+            # Check both locations for feature maps
+            feature_maps = None
+            if "feature_maps" in results:
+                feature_maps = results["feature_maps"]
+            elif "segmentation_results" in results and "feature_maps" in results["segmentation_results"]:
+                feature_maps = results["segmentation_results"]["feature_maps"]
+                
+            if feature_maps:
+                for name, viz in feature_maps.items():
+                    st.write(f"**{name}:**")
+                    st.image(viz, use_container_width=True)
+            else:
+                st.write("No feature map visualizations available")
 
-        if feature_maps or visualizations or reg_viz:
-            tab1, tab2, tab3 = st.tabs(["Feature Maps", "Layer-by-Layer Comparison", "Regularization"])
+        with tab2:
+            # Get layer visualizations - FIXED PART
+            layer_vis = None
+            layer_keys = ["Encoder 1", "Encoder 2", "Encoder 3", "Encoder 4", 
+                         "Bottleneck", "Decoder 4", "Decoder 3", "Decoder 2", "Decoder 1"]
             
-            with tab1:
-                if feature_maps:
-                    for name, viz in feature_maps.items():
-                        st.write(f"**{name}:**")
-                        st.image(viz, use_container_width=True)
-                else:
-                    st.write("No feature map visualizations available")
-
-            with tab2:
-                if visualizations:
-                    vis_keys = [k for k in visualizations.keys() if k not in ["bounding_box_visualization", 
-                                                                            "comparison_visualization", 
-                                                                            "combined_visualization"]]
-                    print(f"Visualizations available: ", vis_keys)
-                    if vis_keys:
-                        print(f"Visualizations available: ", vis_keys)
-                        for key in vis_keys:
-                            st.write(f"**{key} Layer Comparison:**")
-                            st.image(visualizations[key], use_container_width=True)
+            # First check in results["visualizations"] (merged at the start of this function)
+            if "visualizations" in results:
+                vis_keys = [k for k in results["visualizations"].keys() if k in layer_keys]
+                if vis_keys:
+                    layer_vis = results["visualizations"]
+            
+            # If not found, also check in segmentation_results directly as a fallback
+            if not layer_vis and "segmentation_results" in results and "visualizations" in results["segmentation_results"]:
+                vis_keys = [k for k in results["segmentation_results"]["visualizations"].keys() if k in layer_keys]
+                if vis_keys:
+                    layer_vis = results["segmentation_results"]["visualizations"]
+                    
+            # If we found layer visualizations, display them
+            if layer_vis:
+                vis_keys = [k for k in layer_vis.keys() if k in layer_keys]
+                if vis_keys:
+                    for key in vis_keys:
+                        st.write(f"**{key} Layer Comparison:**")
+                        st.image(layer_vis[key], use_container_width=True)
+                        
+                        # Add metrics table for this layer if available
+                        if comparison and "layer_metrics" in comparison and key in comparison["layer_metrics"]:
+                            layer_metric = comparison["layer_metrics"][key]
                             
-                            if comparison and "layer_metrics" in comparison and key in comparison["layer_metrics"]:
-                                layer_metric = comparison["layer_metrics"][key]
-                                
-                                metric_data = {
-                                    "Metric": [
-                                        "Standard Deviation (Objective 1 and 3: ResNet Integration)", 
-                                        "Feature Entropy (Objective 1: Stochastic Feature Pyramid)",
-                                        "Mean Activation (Objective 3: ResNet Integration)"
-                                    ],
-                                    "Base U-Net": [
-                                        f"{layer_metric['baseline']['std_activation']:.4f}",
-                                        f"{layer_metric['baseline']['entropy']:.4f}",
-                                        f"{layer_metric['baseline']['mean_activation']:.4f}"
-                                    ],
-                                    "SPEAR-UNet": [
-                                        f"{layer_metric['enhanced']['std_activation']:.4f}",
-                                        f"{layer_metric['enhanced']['entropy']:.4f}",
-                                        f"{layer_metric['enhanced']['mean_activation']:.4f}"
-                                    ],
-                                    "Improvement": [
-                                        f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
-                                        f"{layer_metric['entropy_improvement']:.1f}%",
-                                        f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%"
-                                    ]
-                                }
-                                
-                                st.table(metric_data)
-                    else:
-                        st.write("No layer-by-layer visualizations available")
+                            metric_data = {
+                                "Metric": [
+                                    "Standard Deviation (Objective 1 and 3: ResNet Integration)", 
+                                    "Feature Entropy (Objective 1: Stochastic Feature Pyramid)",
+                                    "Mean Activation (Objective 3: ResNet Integration)"
+                                ],
+                                "Base U-Net": [
+                                    f"{layer_metric['baseline']['std_activation']:.4f}",
+                                    f"{layer_metric['baseline']['entropy']:.4f}",
+                                    f"{layer_metric['baseline']['mean_activation']:.4f}"
+                                ],
+                                "SPEAR-UNet": [
+                                    f"{layer_metric['enhanced']['std_activation']:.4f}",
+                                    f"{layer_metric['enhanced']['entropy']:.4f}",
+                                    f"{layer_metric['enhanced']['mean_activation']:.4f}"
+                                ],
+                                "Improvement": [
+                                    f"{(layer_metric['enhanced']['std_activation'] - layer_metric['baseline']['std_activation']) / abs(layer_metric['baseline']['std_activation'] + 1e-8) * 100:.1f}%",
+                                    f"{layer_metric['entropy_improvement']:.1f}%",
+                                    f"{(layer_metric['enhanced']['mean_activation'] - layer_metric['baseline']['mean_activation']) / abs(layer_metric['baseline']['mean_activation'] + 1e-8) * 100:.1f}%"
+                                ]
+                            }
+                            
+                            st.table(metric_data)
                 else:
                     st.write("No layer-by-layer visualizations available")
-            
-            with tab3:
-                if reg_viz is not None:
-                    st.write("**Impact of Dynamic Regularization:**")
-                    st.image(reg_viz, use_container_width=True)
-                    
-                    st.write("""
-                    The chart above shows the L1 regularization values applied by the dynamic regularization modules.
-                    Higher values indicate stronger regularization, which helps prevent overfitting.
-                    """)
-                else:
-                    st.write("No regularization visualization available")
-            
-            # Explanation of architectural improvements
-            st.write("---")
-            st.subheader("📚 SPEAR-UNet Architecture Improvements")
-            
-            st.write("""
-            1. **Stochastic Feature Pyramid (SFP)** - Improves multi-scale feature extraction
-            2. **Dynamic Regularization** - Adaptive regularization to prevent overfitting
-            3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
-            """)
+            else:
+                st.write("No layer-by-layer visualizations available")
+        
+        with tab3:
+            # Get regularization visualization
+            reg_viz = None
+            if "regularization_comparison_viz" in results:
+                reg_viz = results["regularization_comparison_viz"]
+            elif "segmentation_results" in results and "regularization_comparison_viz" in results["segmentation_results"]:
+                reg_viz = results["segmentation_results"]["regularization_comparison_viz"]
+
+            if reg_viz is not None:
+                st.write("**Impact of Dynamic Regularization:**")
+                st.image(reg_viz, use_container_width=True)
+                
+                st.write("""
+                The chart above shows the L1 regularization values applied by the dynamic regularization modules.
+                Higher values indicate stronger regularization, which helps prevent overfitting.
+                """)
+            else:
+                st.write("No regularization visualization available")
+        
+        # Explanation of architectural improvements
+        st.write("---")
+        st.subheader("📚 SPEAR-UNet Architecture Improvements")
+        
+        st.write("""
+        1. **Stochastic Feature Pyramid (SFP)** - Improves multi-scale feature extraction
+        2. **Dynamic Regularization** - Adaptive regularization to prevent overfitting
+        3. **ResNet Integration** - Leverages pretrained ResNet-50 weights for better gradient flow
+        """)
     
     st.subheader("Save Results")
 
@@ -1885,7 +1915,6 @@ def main():
                 st.session_state.show_top = False
                 st.session_state.show_bottom = False
                 
-                # Clear verification-related state
                 for key in ["verification_results", "verified_fruit_type", "ignore_verification"]:
                     if key in st.session_state:
                         del st.session_state[key]
