@@ -250,7 +250,7 @@ class FruitRipenessSystem:
 
         self.roboflow_client = InferenceHTTPClient(
             api_url="https://detect.roboflow.com",
-            api_key="UNykbkEetYICFkzzjcqP",
+            api_key="f3eWrtQ6s0nOcRvUxKHd",
         )
         
         self.classification_config = InferenceConfiguration(
@@ -269,6 +269,11 @@ class FruitRipenessSystem:
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
+
+        print("==== HOOKS REGISTRATION CHECK ====")
+        print(f"SPEAR-UNet has activations attribute: {hasattr(self.seg_model, 'activations')}")
+        print(f"SPEAR-UNet has register_hooks method: {hasattr(self.seg_model, 'register_hooks')}")
+        print(f"Baseline U-Net has activations attribute: {hasattr(self.baseline_model, 'activations')}")
     
     def segment_fruit_with_metrics(self, image_path_or_file, refine_segmentation=True, refinement_method="all"):
         """
@@ -455,7 +460,7 @@ class FruitRipenessSystem:
             "refinement_method": refinement_method
         }
     
-    def classify_fruit(self, image, confidence_threshold=0.7):
+    def classify_fruit(self, image, confidence_threshold=0.65):
         """
         Use the fruit classifier to determine the type of fruit
         

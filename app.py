@@ -959,8 +959,7 @@ def display_enhanced_results(results, system, username):
             reg_viz = results["regularization_comparison_viz"]
         elif "segmentation_results" in results and "regularization_comparison_viz" in results["segmentation_results"]:
             reg_viz = results["segmentation_results"]["regularization_comparison_viz"]
-            
-        # Display the tabs only if we have data
+
         if feature_maps or visualizations or reg_viz:
             tab1, tab2, tab3 = st.tabs(["Feature Maps", "Layer-by-Layer Comparison", "Regularization"])
             
@@ -971,14 +970,15 @@ def display_enhanced_results(results, system, username):
                         st.image(viz, use_container_width=True)
                 else:
                     st.write("No feature map visualizations available")
-            
+
             with tab2:
                 if visualizations:
-                    # Check if visualizations contains segmentation model visualizations (not ripeness ones)
                     vis_keys = [k for k in visualizations.keys() if k not in ["bounding_box_visualization", 
                                                                             "comparison_visualization", 
                                                                             "combined_visualization"]]
+                    print(f"Visualizations available: ", vis_keys)
                     if vis_keys:
+                        print(f"Visualizations available: ", vis_keys)
                         for key in vis_keys:
                             st.write(f"**{key} Layer Comparison:**")
                             st.image(visualizations[key], use_container_width=True)
