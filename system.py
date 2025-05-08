@@ -198,7 +198,7 @@ class FruitRipenessSystem:
             self.baseline_model = BasicUNet(n_classes=1).to(self.device)
             print("⚠️ Using randomly initialized baseline U-Net (comparison will be less meaningful)")
         
-        self.class_names = ["tomato", "pineapple", "apple", "banana", "orange"]
+        self.class_names = ["banana", "mango", "pineapple", "strawberry", "tomato"]
         self.classifier_model = FruitClassifier(num_classes=len(self.class_names)).to(self.device)
         
         if os.path.exists(classifier_model_path):
@@ -266,7 +266,6 @@ class FruitRipenessSystem:
         
         self.classifier_transform = transforms.Compose([
             transforms.Resize((224, 224)),
-            transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -456,18 +455,21 @@ class FruitRipenessSystem:
             "refinement_method": refinement_method
         }
     
-    def classify_fruit(self, image):
+    def classify_fruit(self, image, confidence_threshold=0.7):
         """
         Use the fruit classifier to determine the type of fruit
-        This method is kept but not used in the main workflow
         
         Args:
             image: PIL Image to classify
+            confidence_threshold: Minimum confidence required to classify fruit (default: 0.7)
             
         Returns:
-            The fruit type and confidence score
+            The fruit type and confidence score, or "outside_scope" if confidence is too low
         """
         print(f"Classifying fruit...")
+        
+        # Correct class names the model was trained on
+        correct_class_names = ["banana", "mango", "pineapple", "strawberry", "tomato"]
         
         img_tensor = self.classifier_transform(image).unsqueeze(0).to(self.device)
         
@@ -476,13 +478,19 @@ class FruitRipenessSystem:
             probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
             predicted_idx = torch.argmax(probabilities).item()
             confidence = probabilities[predicted_idx].item()
-            fruit_type = self.class_names[predicted_idx]
+            
+            # Use the correct class name mapping
+            if confidence >= confidence_threshold:
+                fruit_type = correct_class_names[predicted_idx]
+                print(f"Classified as: {fruit_type} (confidence: {confidence:.2f})")
+            else:
+                fruit_type = "outside_scope"
+                print(f"Confidence too low ({confidence:.2f}), fruit likely outside scope")
         
-        print(f"Classified as: {fruit_type} (confidence: {confidence:.2f})")
-        
+        # Create all_probs using the correct class names
         all_probs = {
-            self.class_names[i]: probabilities[i].item()
-            for i in range(len(self.class_names))
+            correct_class_names[i]: probabilities[i].item()
+            for i in range(len(correct_class_names))
         }
         
         return fruit_type, confidence, all_probs
@@ -968,10 +976,11 @@ class FruitRipenessSystem:
         
     def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False, use_segmentation=True):
         """
-        Enhanced ripeness analysis flow:
+        Enhanced ripeness analysis flow with fruit type verification:
         1. Initial segmentation to remove background (if use_segmentation is True)
-        2. For patch-based: skip detection and go straight to classification
-        3. For non-patch-based: detect objects then classify each
+        2. Verify fruit type using classifier
+        3. For patch-based: skip detection and go straight to classification
+        4. For non-patch-based: detect objects then classify each
         
         Args:
             image_path_or_file: Path to image or file-like object
@@ -1015,7 +1024,7 @@ class FruitRipenessSystem:
                 segmented_img = img
                 # Create a dummy mask (just for API compatibility)
                 mask = np.zeros((img.height, img.width), dtype=np.uint8)
-                
+                    
                 # Create minimal segmentation results for compatibility
                 segmentation_results = {
                     "original_image": img,
@@ -1027,7 +1036,25 @@ class FruitRipenessSystem:
             # Store original image
             original_img = segmentation_results["original_image"]
             
-            # For patch-based analysis, skip detection and create a single bounding box
+            # ----- ADDED: FRUIT TYPE VERIFICATION STEP -----
+            # Use the classifier to verify fruit type
+            detected_fruit_type, confidence, all_probs = self.classify_fruit(segmented_img)
+            
+            if detected_fruit_type.lower() != fruit_type_normalized:
+                print(f"Warning: Detected fruit type '{detected_fruit_type}' doesn't match selected fruit type '{fruit_type_normalized}'")
+                # Return warning result with both types and confidence scores
+                return {
+                    "warning": "fruit_type_mismatch",
+                    "fruit_type_selected": fruit_type_normalized,
+                    "fruit_type_detected": detected_fruit_type.lower(),
+                    "detection_confidence": confidence,
+                    "all_probabilities": all_probs,
+                    "original_image": original_img,
+                    "segmented_image": segmented_img,
+                    "mask": mask,
+                    "suggestion": f"The uploaded image appears to be a {detected_fruit_type.lower()}, not a {fruit_type_normalized}. Please confirm or select the correct fruit type."
+                }
+            
             if is_patch_based:
                 print("Patch-based analysis - skipping object detection")
                 img_width, img_height = original_img.size
@@ -1179,7 +1206,7 @@ class FruitRipenessSystem:
                 final_result = self.debug_and_fix_enhanced_results(final_result)
             
             return final_result
-            
+                
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1469,5 +1496,27 @@ class FruitRipenessSystem:
         # If no mapping found, return the original class
         return class_name
     
+    def init_fruit_verifier(self):
+        """
+        Add this method to FruitRipenessSystem class
+        It initializes the fruit verifier with the existing classifier
+        """
+        from fruit_verification import FruitVerifier
+        self.fruit_verifier = FruitVerifier(
+            self.classifier_model, 
+            self.class_names, 
+            self.device,
+            self.classifier_transform
+        )
+
+    def verify_fruit_type(self, image, expected_type):
+        """
+        Add this method to FruitRipenessSystem class
+        It provides a convenient interface to the fruit verifier
+        """
+        if not hasattr(self, 'fruit_verifier'):
+            self.init_fruit_verifier()
+        
+        return self.fruit_verifier.verify_fruit_type(image, expected_type)
     
     

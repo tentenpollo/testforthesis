@@ -59,7 +59,6 @@ def load_models(
     import time
     from huggingface_hub.utils import HfHubHTTPError, LocalEntryNotFoundError
     
-    # Create a context where the st.info and st.success messages are suppressed
     class DummyContext:
         def __enter__(self):
             # This placeholder is needed for the context manager
@@ -170,6 +169,84 @@ def load_models(
         st.warning = original_warning
         st.error = original_error
     
+def display_fruit_verification_warning(results, system, username):
+    """
+    Display warning to user when detected fruit type doesn't match selected fruit type.
+    
+    Args:
+        results: Dictionary containing verification results
+        system: FruitRipenessSystem instance
+        username: Current username
+    """
+    st.warning("⚠️ Fruit Type Mismatch Detected")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Original Image")
+        st.image(results["original_image"], use_container_width=True)
+    
+    with col2:
+        st.subheader("Segmented Image")
+        st.image(results["segmented_image"], use_container_width=True)
+    
+    st.markdown(f"### Fruit Type Verification Results")
+    
+    # Display the mismatch information
+    st.markdown(f"""
+    - **You selected:** {results['fruit_type_selected'].title()}
+    - **Detected fruit:** {results['fruit_type_detected'].title()} (confidence: {results['detection_confidence']:.2f})
+    """)
+    
+    # Display all probabilities as a bar chart
+    if 'all_probabilities' in results and results['all_probabilities']:
+        probs = results['all_probabilities']
+        
+        # Sort probabilities by confidence
+        sorted_probs = {k: v for k, v in sorted(probs.items(), key=lambda item: item[1], reverse=True)}
+        
+        st.markdown("### Fruit Classification Probabilities")
+        
+        chart_data = {
+            "Fruit Type": list(sorted_probs.keys()),
+            "Confidence": list(sorted_probs.values())
+        }
+        
+        # Display as a table
+        st.table({
+            "Fruit Type": [k.title() for k in sorted_probs.keys()],
+            "Confidence": [f"{v:.2%}" for v in sorted_probs.values()]
+        })
+    
+    # Provide options to the user
+    st.markdown("### What would you like to do?")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("Proceed Anyway", type="primary"):
+            # Proceed with original fruit type
+            st.session_state.verified_fruit_type = results['fruit_type_selected']
+            st.session_state.ignore_verification = True
+            st.rerun()
+    
+    with col2:
+        if st.button(f"Switch to {results['fruit_type_detected'].title()}", type="primary"):
+            # Switch to detected fruit type
+            st.session_state.selected_fruit = results['fruit_type_detected'].title()
+            st.session_state.verified_fruit_type = results['fruit_type_detected']
+            st.session_state.analysis_step = "analyze"  # Stay on analysis page
+            st.rerun()
+    
+    with col3:
+        if st.button("Cancel Analysis", type="secondary"):
+            # Go back to fruit selection
+            st.session_state.selected_fruit = None
+            st.session_state.analysis_step = "select_fruit"
+            st.session_state.uploaded_file = None
+            st.session_state.camera_image = None
+            st.rerun()
+            
 def combine_multi_angle_results(results_list):
     """
     Combine results from multiple angles of the same fruit
@@ -778,9 +855,7 @@ def display_enhanced_results(results, system, username):
         st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
         st.write(f"- Segmentation model input size: 256x256")
         
-        # Add information about the classification model if available
         if "classification_results" in results:
-            # Check if classification_results is a list or a dictionary
             if isinstance(results["classification_results"], list):
                 if len(results["classification_results"]) > 0:
                     # If it's a list, use the first item if available
@@ -1451,6 +1526,11 @@ def main():
                             del st.session_state.top_file
                         if "bottom_file" in st.session_state:
                             del st.session_state.bottom_file
+                        
+                        # Clear verification-related state
+                        for key in ["verification_results", "verified_fruit_type", "ignore_verification"]:
+                            if key in st.session_state:
+                                del st.session_state[key]
                     
                     st.rerun()
             
@@ -1461,7 +1541,7 @@ def main():
                 st.rerun()
         
         st.divider()    
-        st.caption("Fruit Ripeness Detection System v1.1")
+        st.caption("Fruit Ripeness Detection System v1.2")
         st.caption("© 2025 FruitThesis Industries")
     
     if not st.session_state.logged_in:
@@ -1471,6 +1551,10 @@ def main():
         return
     
     system = load_models()
+    
+    # Initialize fruit verifier if needed
+    if not hasattr(system, 'fruit_verifier') and hasattr(system, 'init_fruit_verifier'):
+        system.init_fruit_verifier()
     
     username = get_current_user()
     
@@ -1613,6 +1697,10 @@ def main():
                 use_enhanced_analysis = st.checkbox("Use Enhanced Two-Stage Analysis", value=True,
                                                 help="Use the two-stage analysis approach with detailed confidence distributions")
                 
+                # ADD FRUIT VERIFICATION OPTION
+                verify_fruit_type = st.checkbox("Enable Fruit Type Verification", value=True,
+                                             help="Verify that the uploaded image contains the selected fruit type")
+                
                 if use_segmentation:
                     refine_segmentation = st.checkbox("Refine Segmentation Mask", value=True, 
                                                 help="Apply post-processing to improve the segmentation mask")
@@ -1631,6 +1719,7 @@ def main():
                 st.session_state.refine_segmentation = refine_segmentation
                 st.session_state.refinement_method = refinement_method
                 st.session_state.use_enhanced_analysis = use_enhanced_analysis
+                st.session_state.verify_fruit_type = verify_fruit_type
             
             if analysis_type == "Single Image":
                 st.write("### Upload Your Image")
@@ -1791,9 +1880,19 @@ def main():
                 st.session_state.start_analysis = False
                 st.session_state.show_top = False
                 st.session_state.show_bottom = False
+                
+                # Clear verification-related state
+                for key in ["verification_results", "verified_fruit_type", "ignore_verification"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
                 st.rerun()
             
             username = get_current_user()
+
+            if "verification_results" in st.session_state:
+                from fruit_verification import display_verification_warning
+                display_verification_warning(st.session_state.verification_results)
+                return 
             
             if st.session_state.uploaded_file is not None or st.session_state.camera_image is not None:
                 # Single image analysis
@@ -1804,10 +1903,60 @@ def main():
                     refine_segmentation = st.session_state.refine_segmentation
                     refinement_method = st.session_state.refinement_method
                     use_enhanced_analysis = st.session_state.use_enhanced_analysis
+                    verify_fruit_type = st.session_state.get("verify_fruit_type", True)
                     
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
+                    # Check if we need to verify fruit type
+                    skip_verification = (not verify_fruit_type or 
+                                         'verified_fruit_type' in st.session_state or 
+                                         'ignore_verification' in st.session_state)
+                    
+                    if not skip_verification and use_segmentation and hasattr(system, 'verify_fruit_type'):
+                        # Perform fruit type verification
+                        status_text.text("Performing initial segmentation for fruit verification...")
+                        progress_bar.progress(15)
+                        
+                        # Load and preprocess image
+                        img = Image.open(image_input).convert('RGB')
+                        timestamp = int(time.time())
+                        temp_path = f"results/verification_image_{timestamp}.png"
+                        img.save(temp_path)
+                        
+                        # Segment the image
+                        try:
+                            seg_results = system.segment_fruit_with_metrics(temp_path)
+                            segmented_img = seg_results["segmented_image"]
+                            
+                            progress_bar.progress(30)
+                            status_text.text("Verifying fruit type...")
+                            
+                            # Verify fruit type
+                            selected_type = st.session_state.selected_fruit.lower()
+                            verification_results = system.verify_fruit_type(segmented_img, selected_type)
+                            
+                            # If mismatch detected, show warning
+                            if not verification_results["is_match"]:
+                                progress_bar.progress(40)
+                                status_text.text("Fruit type mismatch detected. Waiting for user input...")
+                                
+                                # Prepare results for UI
+                                verification_results.update({
+                                    "fruit_type_selected": selected_type,
+                                    "original_image": img,
+                                    "segmented_image": segmented_img
+                                })
+                                
+                                # Store in session state
+                                st.session_state.verification_results = verification_results
+                                st.rerun()  # Show verification UI
+                        except Exception as e:
+                            # Log error but continue
+                            print(f"Error during fruit verification: {str(e)}")
+                            # Continue with normal processing
+                    
+                    # Continue with normal analysis
                     if use_enhanced_analysis:
                         status_text.text(f"Processing {st.session_state.selected_fruit} using two-stage analysis...")
                         progress_bar.progress(25)
@@ -1817,6 +1966,31 @@ def main():
                             fruit_type=st.session_state.selected_fruit.lower(),
                             use_segmentation=use_segmentation
                         )
+                        
+                        if "warning" in results and results["warning"] == "fruit_type_mismatch":
+                            st.session_state.verification_results = {
+                                "fruit_type_selected": results["fruit_type_selected"],
+                                "detected_type": results["fruit_type_detected"],
+                                "confidence": results["detection_confidence"],
+                                "all_probabilities": results["all_probabilities"],
+                                "original_image": results["original_image"],
+                                "segmented_image": results["segmented_image"],
+                                "message": results["suggestion"]
+                            }
+                            st.rerun()
+                            
+                        if "warning" in results and results["warning"] == "fruit_type_mismatch":
+                            # Store verification results in session state
+                            st.session_state.verification_results = {
+                                "fruit_type_selected": results["fruit_type_selected"],
+                                "detected_type": results["fruit_type_detected"],
+                                "confidence": results["detection_confidence"],
+                                "all_probabilities": results["all_probabilities"],
+                                "original_image": results["original_image"],
+                                "segmented_image": results["segmented_image"],
+                                "message": results["suggestion"]
+                            }
+                            st.rerun()
                         
                         progress_bar.progress(100)
                         status_text.text("Enhanced analysis complete!")
@@ -1851,9 +2025,9 @@ def main():
                         status_text.text("Processing complete!")
                         
                         display_results(results, system, use_segmentation, username)
-                    
+            
             elif st.session_state.start_analysis and "front_file" in st.session_state and "back_file" in st.session_state:
-                # Multi-angle (patch-based) analysis
+                # Multi-angle analysis
                 front_file = st.session_state.front_file
                 back_file = st.session_state.back_file
                 top_file = st.session_state.top_file if "top_file" in st.session_state else None
@@ -1863,10 +2037,60 @@ def main():
                 refine_segmentation = st.session_state.refine_segmentation
                 refinement_method = st.session_state.refinement_method
                 use_enhanced_analysis = st.session_state.use_enhanced_analysis
+                verify_fruit_type = st.session_state.get("verify_fruit_type", True)
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
+                # Check if we need to verify fruit type for patch-based analysis
+                skip_verification = (not verify_fruit_type or 
+                                     'verified_fruit_type' in st.session_state or 
+                                     'ignore_verification' in st.session_state)
+                
+                # Verify front image only if verification is enabled
+                if not skip_verification and use_segmentation and hasattr(system, 'verify_fruit_type'):
+                    # Verify fruit type from front view
+                    status_text.text("Verifying fruit type from front view...")
+                    progress_bar.progress(10)
+                    
+                    # Load and preprocess image
+                    img = Image.open(front_file).convert('RGB')
+                    timestamp = int(time.time())
+                    temp_path = f"results/verification_image_{timestamp}.png"
+                    img.save(temp_path)
+                    
+                    # Segment the image
+                    try:
+                        seg_results = system.segment_fruit_with_metrics(temp_path)
+                        segmented_img = seg_results["segmented_image"]
+                        
+                        progress_bar.progress(20)
+                        status_text.text("Verifying fruit type...")
+                        
+                        # Verify fruit type
+                        selected_type = st.session_state.selected_fruit.lower()
+                        verification_results = system.verify_fruit_type(segmented_img, selected_type)
+                        
+                        # If mismatch detected, show warning
+                        if not verification_results["is_match"]:
+                            progress_bar.progress(30)
+                            status_text.text("Fruit type mismatch detected in front view. Waiting for user input...")
+                            
+                            # Prepare results for UI
+                            verification_results.update({
+                                "fruit_type_selected": selected_type,
+                                "original_image": img,
+                                "segmented_image": segmented_img
+                            })
+                            
+                            # Store in session state
+                            st.session_state.verification_results = verification_results
+                            st.rerun()  # Show verification UI
+                    except Exception as e:
+                        # Log error but continue
+                        print(f"Error during fruit verification: {str(e)}")
+                
+                # Continue with normal patch-based analysis
                 status_text.text(f"Processing {st.session_state.selected_fruit} from multiple angles...")
                 
                 results_front = process_angle_image(
