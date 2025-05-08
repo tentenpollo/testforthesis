@@ -238,7 +238,7 @@ class FruitRipenessSystem:
         }
         
         self.classification_models = {
-            "banana": {"type": "roboflow", "model_id": "pisang_susu/1"},
+            "banana": {"type": "roboflow", "model_id": "single-label-classification-zf1sy/1"},
             "mango": {"type": "custom", "model_key": "mango"},
             "tomato": {"type": "custom", "model_key": "tomato"},
             "strawberry": {"type": "custom", "model_key": "strawberry"},
@@ -368,8 +368,6 @@ class FruitRipenessSystem:
             self.baseline_model, self.seg_model, self.key_comparison_layers
         )
         
-        # Generate visualizations with detailed error handling and debugging
-        print("==== GENERATING VISUALIZATIONS ====")
         visualizations = {}
         
         try:
