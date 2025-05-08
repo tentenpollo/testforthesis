@@ -9,3 +9,4 @@ torchvision==0.21.0
 plotly==6.0.1  # Added this based on the error
 pandas==2.2.3   # Added since you're importing pd
 huggingface-hub==0.30.2  # Added based on the import in app.py
+timm==1.0.15
