@@ -1609,6 +1609,10 @@ def main():
         Follow the guided process to analyze your fruit!
         """)
         
+        st.write("""
+        Make sure there is proper lighting in your photo for more accurate results
+        """)
+        
         if "show_top" not in st.session_state:
             st.session_state.show_top = False
         if "show_bottom" not in st.session_state:
