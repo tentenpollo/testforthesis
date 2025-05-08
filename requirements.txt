@@ -6,7 +6,7 @@ Pillow==11.2.1
 streamlit==1.44.1
 torch==2.6.0
 torchvision==0.21.0
-plotly==6.0.1  # Added this based on the error
-pandas==2.2.3   # Added since you're importing pd
-huggingface-hub==0.30.2  # Added based on the import in app.py
+plotly==6.0.1
+pandas==2.2.3
+huggingface-hub==0.30.2
 timm==1.0.15
