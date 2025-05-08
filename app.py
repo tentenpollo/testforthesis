@@ -1768,7 +1768,8 @@ def main():
         """)
         
         st.write("""
-        Make sure there is proper lighting in your photo for more accurate results
+        Make sure there is proper lighting in your photo for more accurate results.
+        Additionally, keep the fruit in focus and center, and avoid any obstructions.
         """)
         
         if "show_top" not in st.session_state:
