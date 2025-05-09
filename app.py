@@ -249,7 +249,7 @@ def display_fruit_verification_warning(results, system, username):
             
 def combine_multi_angle_results(results_list):
     """
-    Combine results from multiple angles of the same fruit
+    Combine results from multiple angles of the same fruit with improved consistency
     
     Args:
         results_list: List of results dictionaries from different angles
@@ -265,32 +265,121 @@ def combine_multi_angle_results(results_list):
     
     combined = valid_results[0].copy()
 
-    ripeness_predictions = {}
-    for r in valid_results:
-        if "ripeness_predictions" in r and r["ripeness_predictions"]:
-            for pred in r["ripeness_predictions"]:
-                ripeness = pred["ripeness"]
-                confidence = pred["confidence"]
-                
-                if ripeness in ripeness_predictions:
-                    ripeness_predictions[ripeness].append(confidence)
-                else:
-                    ripeness_predictions[ripeness] = [confidence]
+    # IMPROVED: Standardize confidence distribution across angles
+    if "confidence_distributions" in valid_results[0]:
+        print("Using enhanced confidence distribution combining method")
+        
+        # Initialize lists to collect all confidence distributions
+        all_distributions = []
+        all_weights = []
+        
+        # Gather confidence distributions from all angles
+        for result in valid_results:
+            if "confidence_distributions" in result and result["confidence_distributions"]:
+                for distribution in result["confidence_distributions"]:
+                    # Skip distributions with errors
+                    if "error" in distribution:
+                        continue
+                        
+                    # Remove metadata keys
+                    clean_distribution = {k: v for k, v in distribution.items() 
+                                         if k not in ["error", "estimated"]}
+                    
+                    if clean_distribution:
+                        all_distributions.append(clean_distribution)
+                        
+                        # Use max confidence as weight for this distribution
+                        max_confidence = max(clean_distribution.values())
+                        all_weights.append(max_confidence)
+        
+        # Combine distributions using weighted average
+        if all_distributions:
+            # Normalize weights
+            if sum(all_weights) > 0:
+                normalized_weights = [w/sum(all_weights) for w in all_weights]
+            else:
+                normalized_weights = [1.0/len(all_weights)] * len(all_weights)
+            
+            # Get all unique ripeness categories
+            all_categories = set()
+            for dist in all_distributions:
+                all_categories.update(dist.keys())
+            
+            # Calculate weighted average for each category
+            combined_distribution = {}
+            for category in all_categories:
+                weighted_sum = 0
+                for dist, weight in zip(all_distributions, normalized_weights):
+                    weighted_sum += dist.get(category, 0) * weight
+                combined_distribution[category] = weighted_sum
+            
+            # Normalize the combined distribution
+            total = sum(combined_distribution.values())
+            if total > 0:
+                combined_distribution = {k: v/total for k, v in combined_distribution.items()}
+            
+            # Create prediction format expected by display functions
+            combined_predictions = []
+            for ripeness, confidence in sorted(combined_distribution.items(), 
+                                               key=lambda x: x[1], reverse=True):
+                combined_predictions.append({
+                    "ripeness": ripeness,
+                    "confidence": confidence
+                })
+            
+            combined["ripeness_predictions"] = combined_predictions
+            combined["confidence_distributions"] = [combined_distribution]
+        else:
+            # Fallback to old method if no distributions found
+            print("No valid confidence distributions found, using legacy method")
+            ripeness_predictions = {}
+            for r in valid_results:
+                if "ripeness_predictions" in r and r["ripeness_predictions"]:
+                    for pred in r["ripeness_predictions"]:
+                        ripeness = pred["ripeness"]
+                        confidence = pred["confidence"]
+                        
+                        if ripeness in ripeness_predictions:
+                            ripeness_predictions[ripeness].append(confidence)
+                        else:
+                            ripeness_predictions[ripeness] = [confidence]
+            
+            combined_predictions = []
+            for ripeness, confidences in ripeness_predictions.items():
+                avg_confidence = sum(confidences) / len(confidences)
+                combined_predictions.append({
+                    "ripeness": ripeness, 
+                    "confidence": avg_confidence
+                })
+            
+            combined_predictions = sorted(combined_predictions, key=lambda x: x["confidence"], reverse=True)
+            combined["ripeness_predictions"] = combined_predictions
+    else:
+        # Legacy method for old-style results
+        ripeness_predictions = {}
+        for r in valid_results:
+            if "ripeness_predictions" in r and r["ripeness_predictions"]:
+                for pred in r["ripeness_predictions"]:
+                    ripeness = pred["ripeness"]
+                    confidence = pred["confidence"]
+                    
+                    if ripeness in ripeness_predictions:
+                        ripeness_predictions[ripeness].append(confidence)
+                    else:
+                        ripeness_predictions[ripeness] = [confidence]
+        
+        combined_predictions = []
+        for ripeness, confidences in ripeness_predictions.items():
+            avg_confidence = sum(confidences) / len(confidences)
+            combined_predictions.append({
+                "ripeness": ripeness,
+                "confidence": avg_confidence
+            })
+        
+        combined_predictions = sorted(combined_predictions, key=lambda x: x["confidence"], reverse=True)
+        combined["ripeness_predictions"] = combined_predictions
     
-    
-    combined_predictions = []
-    for ripeness, confidences in ripeness_predictions.items():
-        avg_confidence = sum(confidences) / len(confidences)
-        combined_predictions.append({
-            "ripeness": ripeness,
-            "confidence": avg_confidence
-        })
-    
-    
-    combined_predictions = sorted(combined_predictions, key=lambda x: x["confidence"], reverse=True)
-    combined["ripeness_predictions"] = combined_predictions
-    
-    
+    # Add multi-angle metadata
     combined["multi_angle"] = True
     combined["num_angles"] = len(valid_results)
     combined["angle_results"] = valid_results
@@ -302,11 +391,10 @@ def process_angle_image(system, image_file, fruit_type, angle_name, use_segmenta
     """Process an image for a specific angle in patch-based analysis"""
     try:
         if use_enhanced_analysis:
-            # Use the enhanced two-stage analysis
             results = system.analyze_ripeness_enhanced(
                 image_file,
                 fruit_type=fruit_type,
-                is_patch_based=True,
+                is_patch_based=True,  # Flag as patch-based but still use object detection
                 use_segmentation=use_segmentation  # Pass the user's segmentation preference
             )
             # Add angle name to results

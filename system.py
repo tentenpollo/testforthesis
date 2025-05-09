@@ -304,10 +304,7 @@ class FruitRipenessSystem:
             self.seg_model.activations.clear()
         if hasattr(self.baseline_model, 'activations'):
             self.baseline_model.activations.clear()
-        
-        print("==== PRE-FORWARD ACTIVATIONS CHECK ====")
-        print(f"SPEAR-UNet activations before forward: {list(self.seg_model.activations.keys())}")
-        print(f"Baseline U-Net activations before forward: {list(self.baseline_model.activations.keys())}")
+    
         
         # Track inference time for both models
         start_baseline = time.time()
@@ -325,10 +322,6 @@ class FruitRipenessSystem:
             enhanced_mask = torch.sigmoid(enhanced_output) > 0.5
             enhanced_mask = enhanced_mask.squeeze().cpu().numpy().astype(np.uint8)
         enhanced_time = time.time() - start_enhanced
-        
-        print("==== POST-FORWARD ACTIVATIONS CHECK ====")
-        print(f"SPEAR-UNet activations after forward: {list(self.seg_model.activations.keys())}")
-        print(f"Baseline U-Net activations after forward: {list(self.baseline_model.activations.keys())}")
         
         # Resize masks back to original image size
         baseline_mask = cv2.resize(baseline_mask, (original_size[0], original_size[1]), interpolation=cv2.INTER_NEAREST)
@@ -374,7 +367,6 @@ class FruitRipenessSystem:
             visualizations = generate_comparison_visualization(
                 self.baseline_model, self.seg_model, self.key_comparison_layers
             )
-            print(f"Generated visualizations keys: {list(visualizations.keys())}")
         except Exception as e:
             import traceback
             print(f"⚠️ Error generating visualizations: {str(e)}")
@@ -482,7 +474,6 @@ class FruitRipenessSystem:
             "refinement_method": refinement_method
         }
         
-        print(f"Visualization keys in result_dict: {list(result_dict['visualizations'].keys())}")
         
         # Return all results with metrics
         return {
@@ -1143,8 +1134,8 @@ class FruitRipenessSystem:
         Enhanced ripeness analysis flow with fruit type verification:
         1. Initial segmentation to remove background (if use_segmentation is True)
         2. Verify fruit type using classifier
-        3. For patch-based: skip detection and go straight to classification
-        4. For non-patch-based: detect objects then classify each
+        3. MODIFIED: Always perform object detection for both patch-based and single image modes
+        4. Process detected objects through classification pipeline
         
         Args:
             image_path_or_file: Path to image or file-like object
@@ -1219,8 +1210,73 @@ class FruitRipenessSystem:
                     "suggestion": f"The uploaded image appears to be a {detected_fruit_type.lower()}, not a {fruit_type_normalized}. Please confirm or select the correct fruit type."
                 }
             
-            if is_patch_based:
-                print("Patch-based analysis - skipping object detection")
+            # MODIFIED: Always use object detection regardless of mode
+            # Prepare segmented image for object detection
+            temp_segmented_path = f"results/temp_segmented_{int(time.time())}.png"
+            segmented_img.save(temp_segmented_path)
+            
+            # STEP 2: Use Roboflow to detect objects in the segmented image
+            print(f"Detecting fruits using Roboflow model...")
+            detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
+            if not detection_model_id:
+                raise ValueError(f"No detection model available for {fruit_type}")
+            
+            try:
+                # Get detection results
+                detection_results = self.roboflow_client.infer(
+                    temp_segmented_path, 
+                    model_id=detection_model_id
+                )
+                predictions = detection_results.get("predictions", [])
+                
+                # Clean up temporary file
+                if os.path.exists(temp_segmented_path):
+                    os.remove(temp_segmented_path)
+                    
+                print(f"Detected {len(predictions)} fruits in the image")
+                
+                # If no fruits detected, use fallback approach
+                if not predictions:
+                    print("No fruits detected by detection model. Using fallback approach...")
+                    if use_segmentation:
+                        # Use connected components as fallback when segmentation is on
+                        num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
+                        num_fruits = num_labels - 1
+                        
+                        if num_fruits >= 1:
+                            # Create bounding boxes for each connected component
+                            predictions = []
+                            for label in range(1, num_labels):  # Skip background (0)
+                                component_mask = (labels == label).astype(np.uint8)
+                                contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                if contours:
+                                    x, y, w, h = cv2.boundingRect(contours[0])
+                                    predictions.append({
+                                        "x": x + w/2,
+                                        "y": y + h/2,
+                                        "width": w,
+                                        "height": h,
+                                        "confidence": 0.9,
+                                        "class": fruit_type_normalized
+                                    })
+                    
+                    # If still no fruits detected or segmentation was off, create a single bounding box
+                    if not predictions:
+                        img_width, img_height = original_img.size
+                        predictions = [{
+                            "x": img_width / 2,
+                            "y": img_height / 2,
+                            "width": img_width,
+                            "height": img_height,
+                            "confidence": 1.0,
+                            "class": fruit_type_normalized
+                        }]
+                    
+                    # Create synthetic detection_results
+                    detection_results = {"predictions": predictions}
+            except Exception as e:
+                print(f"Error using Roboflow detection model: {str(e)}")
+                # Fallback: use the whole image
                 img_width, img_height = original_img.size
                 predictions = [{
                     "x": img_width / 2,
@@ -1231,85 +1287,8 @@ class FruitRipenessSystem:
                     "class": fruit_type_normalized
                 }]
                 detection_results = {"predictions": predictions}
-            else:
-                # Regular flow with object detection
-                temp_segmented_path = f"results/temp_segmented_{int(time.time())}.png"
-                segmented_img.save(temp_segmented_path)
                 
-                # STEP 2: Use Roboflow to detect objects in the segmented image
-                print(f"Detecting fruits using Roboflow model...")
-                detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
-                if not detection_model_id:
-                    raise ValueError(f"No detection model available for {fruit_type}")
-                
-                try:
-                    # Get detection results
-                    detection_results = self.roboflow_client.infer(
-                        temp_segmented_path, 
-                        model_id=detection_model_id
-                    )
-                    predictions = detection_results.get("predictions", [])
-                    
-                    # Clean up temporary file
-                    if os.path.exists(temp_segmented_path):
-                        os.remove(temp_segmented_path)
-                        
-                    print(f"Detected {len(predictions)} fruits in the image")
-                    
-                    # If no fruits detected, use fallback approach
-                    if not predictions:
-                        print("No fruits detected by detection model. Using fallback approach...")
-                        if use_segmentation:
-                            # Use connected components as fallback when segmentation is on
-                            num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8))
-                            num_fruits = num_labels - 1
-                            
-                            if num_fruits >= 1:
-                                # Create bounding boxes for each connected component
-                                predictions = []
-                                for label in range(1, num_labels):  # Skip background (0)
-                                    component_mask = (labels == label).astype(np.uint8)
-                                    contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                                    if contours:
-                                        x, y, w, h = cv2.boundingRect(contours[0])
-                                        predictions.append({
-                                            "x": x + w/2,
-                                            "y": y + h/2,
-                                            "width": w,
-                                            "height": h,
-                                            "confidence": 0.9,
-                                            "class": fruit_type_normalized
-                                        })
-                        
-                        # If still no fruits or segmentation was off, create a single bounding box
-                        if not predictions:
-                            img_width, img_height = original_img.size
-                            predictions = [{
-                                "x": img_width / 2,
-                                "y": img_height / 2,
-                                "width": img_width,
-                                "height": img_height,
-                                "confidence": 1.0,
-                                "class": fruit_type_normalized
-                            }]
-                        
-                        # Create synthetic detection_results
-                        detection_results = {"predictions": predictions}
-                except Exception as e:
-                    print(f"Error using Roboflow detection model: {str(e)}")
-                    # Fallback: use the whole image
-                    img_width, img_height = original_img.size
-                    predictions = [{
-                        "x": img_width / 2,
-                        "y": img_height / 2,
-                        "width": img_width,
-                        "height": img_height,
-                        "confidence": 1.0,
-                        "class": fruit_type_normalized
-                    }]
-                    detection_results = {"predictions": predictions}
-            
-            # STEP 3: Process each detected fruit (only one for patch-based)
+            # STEP 3: Process each detected fruit
             fruits_data = []
             classification_results = []
             confidence_distributions = []
@@ -1340,6 +1319,9 @@ class FruitRipenessSystem:
                 classification_results.append(result["classification"])
                 confidence_distributions.append(result["confidence_distribution"])
             
+            # ADDED: If patch-based and multiple angles need to be combined later, store the mode information
+            patch_based_flag = is_patch_based
+            
             # Combine all results
             final_result = {
                 "fruit_type": fruit_type,
@@ -1352,7 +1334,7 @@ class FruitRipenessSystem:
                 "segmentation_results": segmentation_results,
                 "mask": mask,
                 "raw_results": detection_results,
-                "is_patch_based": is_patch_based,  # Add flag for display functions
+                "is_patch_based": patch_based_flag,  # Store flag for display functions
                 "use_segmentation": use_segmentation,  # Add flag to indicate if segmentation was used
                 "analysis_type": "enhanced_two_stage"  # Explicitly mark as two-stage analysis
             }
