@@ -238,7 +238,7 @@ class FruitRipenessSystem:
         }
         
         self.classification_models = {
-            "banana": {"type": "roboflow", "model_id": "single-label-classification-zf1sy/1"},
+            "banana": {"type": "custom", "model_id": "banana"},
             "mango": {"type": "custom", "model_key": "mango"},
             "tomato": {"type": "custom", "model_key": "tomato"},
             "strawberry": {"type": "custom", "model_key": "strawberry"},

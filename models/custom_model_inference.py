@@ -88,7 +88,7 @@ class CustomModelInference:
             "drop_path_rate": 0.2  # Called 'stochastic_depth' in the training config
         }
         
-        self.model_configs["mango"] = {
+        self.model_configs["banana"] = {
             "repo_id": "TentenPolllo/banana",  # Update with your actual repo once published
             "filename": "best_banana_model.pth",
             "input_size": (256, 256),  # Matches the img_size in the training config
