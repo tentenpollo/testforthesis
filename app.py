@@ -168,7 +168,477 @@ def load_models(
         st.success = original_success
         st.warning = original_warning
         st.error = original_error
+
+def display_card_ripeness_results(results, system, username):
+    """Display ripeness analysis results in a card format with percentages"""
+    if "error" in results and "fruits_data" not in results:
+        st.error(f"Error: {results['error']}")
+        return
     
+    # Get basic info from results
+    use_segmentation = results.get("use_segmentation", True)
+    fruit_type = results.get("fruit_type", "Unknown")
+    num_fruits = results.get("num_fruits", 0)
+    
+    # Display header with fruit emoji
+    fruit_emoji = get_fruit_emoji(fruit_type)
+    st.header(f"{fruit_emoji} {fruit_type.title()} Analysis")
+    
+    # Display images
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Original Image")
+        if "visualizations" in results and "bounding_box_visualization" in results["visualizations"]:
+            bbox_path = results["visualizations"]["bounding_box_visualization"]
+            bbox_img = Image.open(bbox_path)
+            st.image(bbox_img, use_container_width=True)
+        else:
+            st.image(results["original_image"], use_container_width=True)
+    
+    with col2:
+        if use_segmentation:
+            st.subheader("Processed Fruit")
+            st.image(results["segmented_image"], use_container_width=True)
+        else:
+            st.subheader("Processed Image")
+            st.image(results["original_image"], use_container_width=True)
+    
+    # Handle multiple fruits
+    if num_fruits > 1:
+        # Create tabs for each fruit
+        fruit_tabs = st.tabs([f"Fruit #{i+1}" for i in range(num_fruits)])
+        
+        for i, (tab, fruit_data) in enumerate(zip(fruit_tabs, results.get("fruits_data", []))):
+            with tab:
+                confidence_distribution = results.get("confidence_distributions", [])[i] if i < len(results.get("confidence_distributions", [])) else {}
+                display_ripeness_card(fruit_data, confidence_distribution, fruit_type, i+1)
+    else:
+        # Single fruit display
+        confidence_distribution = results.get("confidence_distributions", [])[0] if results.get("confidence_distributions") else {}
+        fruit_data = results.get("fruits_data", [])[0] if results.get("fruits_data") else {}
+        display_ripeness_card(fruit_data, confidence_distribution, fruit_type)
+    
+    # Technical details in an expander
+    with st.expander("Technical Details"):
+        # Display confidence distributions and visualizations
+        if num_fruits > 1:
+            for i, distribution in enumerate(results.get("confidence_distributions", [])):
+                if distribution and "error" not in distribution:
+                    st.subheader(f"Ripeness Confidence for Fruit #{i+1}")
+                    
+                    # Filter out non-confidence keys
+                    filtered_distribution = {k: v for k, v in distribution.items() 
+                                          if k not in ["error", "estimated"]}
+                    
+                    # Create table
+                    confidence_data = {
+                        "Ripeness Level": list(filtered_distribution.keys()),
+                        "Confidence": [f"{v:.2f}" for v in filtered_distribution.values()],
+                        "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+                    }
+                    
+                    st.table(confidence_data)
+                    
+                    # Display visualization if available
+                    viz_path = visualize_confidence_distribution(
+                        results.get("fruits_data", [])[i], distribution, fruit_type
+                    )
+                    viz_img = Image.open(viz_path)
+                    st.image(viz_img, use_container_width=True)
+        else:
+            distribution = results.get("confidence_distributions", [])[0] if results.get("confidence_distributions") else {}
+            if distribution and "error" not in distribution:
+                st.subheader("Ripeness Confidence Values")
+                
+                # Filter out non-confidence keys
+                filtered_distribution = {k: v for k, v in distribution.items() 
+                                      if k not in ["error", "estimated"]}
+                
+                # Create table
+                confidence_data = {
+                    "Ripeness Level": list(filtered_distribution.keys()),
+                    "Confidence": [f"{v:.2f}" for v in filtered_distribution.values()],
+                    "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+                }
+                
+                st.table(confidence_data)
+                
+                # Display visualization if available
+                viz_path = visualize_confidence_distribution(
+                    results.get("fruits_data", [])[0], distribution, fruit_type
+                )
+                viz_img = Image.open(viz_path)
+                st.image(viz_img, use_container_width=True)
+        
+        # Add segmentation mask and model information
+        if use_segmentation:
+            st.subheader("Segmentation Mask")
+            st.image(results["mask"] * 255, clamp=True, use_container_width=True)
+            
+            if "mask_metrics" in results:
+                st.write("**Mask Quality Metrics:**")
+                metrics = results["mask_metrics"]
+                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
+                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+        
+        # Add model information
+        st.subheader("Model Information")
+        st.write(f"- Device used: {system.device}")
+        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
+    
+    # Save results section
+    if username and username != "guest":
+        save_user_results(results, username)
+    else:
+        st.info("💡 Log in with a user account to save your analysis results for future reference.")
+
+def display_ripeness_card(fruit_data, confidence_distribution, fruit_type, fruit_number=None):
+    """Display fruit ripeness information with a clean, functional layout"""
+    
+    # Get ripeness assessment and percentages
+    ripeness_level, confidence, all_percentages = get_ripeness_with_percentages(confidence_distribution)
+    
+    # Create main container
+    with st.container():
+        # Header row with fruit image and title
+        header_cols = st.columns([1, 3]) if "masked_crop_path" in fruit_data else [1]
+        
+        # Image column
+        with header_cols[0]:
+            if "masked_crop_path" in fruit_data and os.path.exists(fruit_data["masked_crop_path"]):
+                img = Image.open(fruit_data["masked_crop_path"])
+                st.image(img, width=150)
+        
+        # Title and ripeness info column
+        with header_cols[1] if len(header_cols) > 1 else header_cols[0]:
+            # Fruit title with emoji
+            emoji = get_fruit_emoji(fruit_type)
+            title = f"{emoji} {fruit_type.title()}"
+            if fruit_number:
+                title += f" #{fruit_number}"
+            st.markdown(f"## {title}")
+            
+            # Ripeness indicator
+            ripeness_icon = get_ripeness_icon(ripeness_level)
+            st.markdown(f"### {ripeness_icon} {ripeness_level} ({confidence*100:.1f}%)")
+        
+        # Assessment section
+        st.markdown("## Assessment & Recommendations")
+        
+        # Create three columns for assessment sections
+        col1, col2, col3 = st.columns(3)
+        
+        # Condition column
+        with col1:
+            st.markdown("### Condition")
+            condition_text = get_condition_text(ripeness_level, fruit_type)
+            st.markdown(condition_text)
+            
+            # Add a colored box or indicator based on ripeness
+            if ripeness_level == "Ripe":
+                st.success("Optimal condition")
+            elif ripeness_level == "Unripe":
+                st.warning("Not ready yet")
+            elif ripeness_level == "Overripe":
+                st.error("Past prime condition")
+            else:
+                st.info("Condition unknown")
+        
+        # Shelf Life column
+        with col2:
+            st.markdown("### Shelf Life")
+            shelf_life = get_shelf_life(ripeness_level, fruit_type)
+            shelf_icon = get_shelf_life_icon(ripeness_level)
+            st.markdown(f"{shelf_icon} {shelf_life}")
+            
+            # Add a visual indicator
+            if ripeness_level == "Ripe":
+                st.warning("Limited time remaining")
+            elif ripeness_level == "Unripe":
+                st.success("Good shelf life")
+            elif ripeness_level == "Overripe":
+                st.error("Use immediately")
+            else:
+                st.info("Shelf life unknown")
+        
+        # Recommendation column
+        with col3:
+            st.markdown("### Recommendation")
+            recommendation = get_recommendation(ripeness_level, fruit_type)
+            rec_icon = get_recommendation_icon(ripeness_level)
+            st.markdown(f"{rec_icon} {recommendation}")
+            
+            # Add action button or suggestion
+            if ripeness_level == "Ripe":
+                st.success("Ready to eat")
+            elif ripeness_level == "Unripe":
+                st.info("Wait before consuming")
+            elif ripeness_level == "Overripe":
+                st.warning("Cooking recommended")
+            else:
+                st.info("No specific recommendation")
+
+def get_ripeness_with_percentages(confidence_distribution):
+    """Get ripeness level with percentages for all levels"""
+    if not confidence_distribution or "error" in confidence_distribution:
+        return "Unknown", 0.0, {"Unknown": 1.0}
+    
+    # Filter out non-confidence keys
+    filtered_distribution = {k: v for k, v in confidence_distribution.items() 
+                           if k not in ["error", "estimated"]}
+    
+    if not filtered_distribution:
+        return "Unknown", 0.0, {"Unknown": 1.0}
+    
+    # Find the ripeness level with highest confidence
+    ripeness_level, confidence = max(filtered_distribution.items(), key=lambda x: x[1])
+    
+    # Normalize to just the three main levels if needed
+    if ripeness_level not in ["Ripe", "Unripe", "Overripe"]:
+        # Map other labels to the three main categories
+        if ripeness_level in ["Partially Ripe", "Underripe"]:
+            ripeness_level = "Unripe"
+        elif ripeness_level in ["Fully Ripe"]:
+            ripeness_level = "Ripe"
+    
+    # Return the main ripeness level, its confidence, and all percentages
+    return ripeness_level, confidence, filtered_distribution
+
+def get_ripeness_icon(ripeness_level):
+    """Get appropriate icon for ripeness level"""
+    if ripeness_level == "Ripe":
+        return "✅"
+    elif ripeness_level == "Unripe":
+        return "🔸"
+    elif ripeness_level == "Overripe":
+        return "🔶"
+    else:
+        return "❓"
+
+def get_shelf_life_icon(ripeness_level):
+    """Get shelf life icon based on ripeness level"""
+    if ripeness_level == "Unripe":
+        return "🟢"
+    elif ripeness_level == "Ripe":
+        return "🟡"
+    elif ripeness_level == "Overripe":
+        return "🔶"
+    else:
+        return "⚠️"
+
+def get_recommendation_icon(ripeness_level):
+    """Get recommendation icon based on ripeness level"""
+    if ripeness_level == "Unripe":
+        return "⏳"
+    elif ripeness_level == "Ripe":
+        return "✅"
+    elif ripeness_level == "Overripe":
+        return "⚠️"
+    else:
+        return "❓"
+
+def get_condition_text(ripeness_level, fruit_type):
+    """Get condition text based on ripeness level and fruit type"""
+    fruit_type = fruit_type.lower()
+    
+    if ripeness_level == "Unripe":
+        if fruit_type == "banana":
+            return "Firm texture with green color. Not sweet yet."
+        elif fruit_type == "tomato":
+            return "Firm with green or light red color. Tart flavor."
+        elif fruit_type == "strawberry":
+            return "Firm with white or light red areas. Tart flavor."
+        elif fruit_type == "mango":
+            return "Hard texture with green color. Not sweet yet."
+        elif fruit_type == "pineapple":
+            return "Firm texture with green exterior. Acidic flavor."
+        return "Not ready for optimal consumption."
+    
+    elif ripeness_level == "Ripe":
+        if fruit_type == "banana":
+            return "Yellow with slight brown specks. Sweet flavor and soft texture."
+        elif fruit_type == "tomato":
+            return "Uniform red color with slight give when pressed. Sweet-acidic balance."
+        elif fruit_type == "strawberry":
+            return "Bright red color with slight give. Sweet flavor."
+        elif fruit_type == "mango":
+            return "Yields to gentle pressure. Sweet aroma and flavor."
+        elif fruit_type == "pineapple":
+            return "Golden yellow color with sweet aroma. Sweet-tart balance."
+        return "Perfect for consumption now."
+    
+    elif ripeness_level == "Overripe":
+        if fruit_type == "banana":
+            return "Brown spots cover most of peel. Very soft and very sweet."
+        elif fruit_type == "tomato":
+            return "Very soft with possible wrinkles. Less acidic but may be mealy."
+        elif fruit_type == "strawberry":
+            return "Dark red with soft spots. Very sweet but may be mushy."
+        elif fruit_type == "mango":
+            return "Very soft with wrinkles. Very sweet but possibly stringy."
+        elif fruit_type == "pineapple":
+            return "Orange-yellow color with very soft feel. May taste fermented."
+        return "Past optimal consumption window."
+    
+    return "Condition unknown."
+
+def get_shelf_life(ripeness_level, fruit_type):
+    """Get shelf life information based on ripeness level and fruit type"""
+    if ripeness_level == "Unripe":
+        if fruit_type.lower() == "banana":
+            return "4-5 days at room temperature"
+        elif fruit_type.lower() == "tomato":
+            return "7-10 days at room temperature"
+        elif fruit_type.lower() == "strawberry":
+            return "1-2 days at room temperature"
+        elif fruit_type.lower() == "mango":
+            return "7-14 days at room temperature"
+        elif fruit_type.lower() == "pineapple":
+            return "5-7 days at room temperature"
+        return "Several days as it ripens"
+    
+    elif ripeness_level == "Ripe":
+        if fruit_type.lower() == "banana":
+            return "1-2 days at room temperature"
+        elif fruit_type.lower() == "tomato":
+            return "2-3 days at room temperature"
+        elif fruit_type.lower() == "strawberry":
+            return "1-2 days refrigerated"
+        elif fruit_type.lower() == "mango":
+            return "1-2 days at room temperature"
+        elif fruit_type.lower() == "pineapple":
+            return "1-2 days at room temperature"
+        return "Limited shelf life, consume soon"
+    
+    elif ripeness_level == "Overripe":
+        if fruit_type.lower() == "banana":
+            return "Use immediately or freeze"
+        elif fruit_type.lower() == "tomato":
+            return "Use immediately"
+        elif fruit_type.lower() == "strawberry":
+            return "Use immediately or freeze"
+        elif fruit_type.lower() == "mango":
+            return "Use immediately or freeze"
+        elif fruit_type.lower() == "pineapple":
+            return "Use immediately"
+        return "Use immediately"
+    
+    return "Shelf life unknown"
+
+def get_recommendation(ripeness_level, fruit_type):
+    """Get recommendation based on ripeness level and fruit type"""
+    if ripeness_level == "Unripe":
+        if fruit_type.lower() == "banana":
+            return "Wait 2-3 days before eating."
+        elif fruit_type.lower() == "tomato":
+            return "Place in paper bag to speed ripening."
+        elif fruit_type.lower() == "strawberry":
+            return "Wait 1-2 days at room temperature."
+        elif fruit_type.lower() == "mango":
+            return "Place in paper bag to speed ripening."
+        elif fruit_type.lower() == "pineapple":
+            return "Place upside down to promote even ripening."
+        return "Allow to ripen before consuming."
+    
+    elif ripeness_level == "Ripe":
+        if fruit_type.lower() == "banana":
+            return "Perfect for eating now."
+        elif fruit_type.lower() == "tomato":
+            return "Ideal for fresh eating in salads."
+        elif fruit_type.lower() == "strawberry":
+            return "Perfect for eating now. Refrigerate to extend life."
+        elif fruit_type.lower() == "mango":
+            return "Ready to eat. Refrigerate to extend life."
+        elif fruit_type.lower() == "pineapple":
+            return "Perfect for eating fresh now."
+        return "Ready for consumption now."
+    
+    elif ripeness_level == "Overripe":
+        if fruit_type.lower() == "banana":
+            return "Use for baking or smoothies."
+        elif fruit_type.lower() == "tomato":
+            return "Use for cooking, sauces or soups."
+        elif fruit_type.lower() == "strawberry":
+            return "Use for smoothies or jams."
+        elif fruit_type.lower() == "mango":
+            return "Use for smoothies or purees."
+        elif fruit_type.lower() == "pineapple":
+            return "Use for smoothies or cooking."
+        return "Best used for cooking or processing."
+    
+    return "No specific recommendation available."
+
+def get_fruit_emoji(fruit_type):
+    """Get emoji for fruit type"""
+    fruit_type = fruit_type.lower()
+    
+    if fruit_type == "banana":
+        return "🍌"
+    elif fruit_type == "tomato":
+        return "🍅"
+    elif fruit_type == "strawberry":
+        return "🍓"
+    elif fruit_type == "mango":
+        return "🥭"
+    elif fruit_type == "pineapple":
+        return "🍍"
+    
+    return "🍎"
+
+def save_user_results(results, username):
+    """Save user results with simplified UI"""
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        save_note = st.text_input("Add note (optional)", key="save_note")
+    
+    with col2:
+        save_button = st.button("💾 Save Results", type="primary", key="save_button")
+        
+        if save_button:
+            # Create serializable copy of results
+            save_results = make_serializable(results)
+            
+            # Add user's note
+            save_results["user_note"] = save_note
+            
+            # Add analysis type info
+            save_results["analysis_type"] = "enhanced"
+            
+            # Save image paths
+            image_paths = {}
+            timestamp = int(time.time())
+            
+            # Save original image
+            if isinstance(results.get("original_image"), Image.Image):
+                original_path = f"results/original_{timestamp}.png"
+                results["original_image"].save(original_path)
+                image_paths["original"] = original_path
+                save_results["original_image_path"] = original_path
+            elif "original_image_path" in results:
+                image_paths["original"] = results["original_image_path"]
+            
+            # Save segmented image
+            if isinstance(results.get("segmented_image"), Image.Image):
+                segmented_path = f"results/segmented_{timestamp}.png"
+                results["segmented_image"].save(segmented_path)
+                image_paths["segmented"] = segmented_path
+                save_results["segmented_image_path"] = segmented_path
+            elif "segmented_image_path" in results:
+                image_paths["segmented"] = results["segmented_image_path"]
+            
+            try:
+                # Save the results
+                result_id = save_enhanced_user_result(username, save_results, image_paths)
+                st.success(f"✅ Results saved! (ID: {result_id})")
+                
+                # Add button to view history
+                if st.button("View History"):
+                    st.session_state.page = "history"
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error saving results: {str(e)}")
+                
 def display_fruit_verification_warning(results, system, username):
     """
     Display warning to user when detected fruit type doesn't match selected fruit type.
@@ -190,13 +660,13 @@ def display_fruit_verification_warning(results, system, username):
         st.subheader("Segmented Image")
         st.image(results["segmented_image"], use_container_width=True)
     
-    st.markdown(f"### Fruit Type Verification Results")
+    st.markdown(f"### Fruit Type Verification Results", unsafe_allow_html=True)
     
     # Display the mismatch information
     st.markdown(f"""
     - **You selected:** {results['fruit_type_selected'].title()}
     - **Detected fruit:** {results['fruit_type_detected'].title()} (confidence: {results['detection_confidence']:.2f})
-    """)
+    """, unsafe_allow_html=True)
     
     # Display all probabilities as a bar chart
     if 'all_probabilities' in results and results['all_probabilities']:
@@ -205,7 +675,7 @@ def display_fruit_verification_warning(results, system, username):
         # Sort probabilities by confidence
         sorted_probs = {k: v for k, v in sorted(probs.items(), key=lambda item: item[1], reverse=True)}
         
-        st.markdown("### Fruit Classification Probabilities")
+        st.markdown("### Fruit Classification Probabilities", unsafe_allow_html=True)
         
         chart_data = {
             "Fruit Type": list(sorted_probs.keys()),
@@ -219,7 +689,7 @@ def display_fruit_verification_warning(results, system, username):
         })
     
     # Provide options to the user
-    st.markdown("### What would you like to do?")
+    st.markdown("### What would you like to do?", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
@@ -1100,7 +1570,7 @@ def display_enhanced_results(results, system, username):
                         available_layers.append(layer)
                 
                 # Create 3 separate tables - one for each metric type
-                st.markdown("### Standard Deviation")
+                st.markdown("### Standard Deviation", unsafe_allow_html=True)
                 std_table = {
                     "Layer": available_layers,
                     "Base U-Net": [],
@@ -1126,7 +1596,7 @@ def display_enhanced_results(results, system, username):
                 
                 st.table(std_table)
                 
-                st.markdown("### Feature Entropy")
+                st.markdown("### Feature Entropy", unsafe_allow_html=True)
                 entropy_table = {
                     "Layer": available_layers,
                     "Base U-Net": [],
@@ -1152,7 +1622,7 @@ def display_enhanced_results(results, system, username):
                 
                 st.table(entropy_table)
                 
-                st.markdown("### Mean Activation")
+                st.markdown("### Mean Activation", unsafe_allow_html=True)
                 mean_table = {
                     "Layer": available_layers,
                     "Base U-Net": [],
@@ -1193,7 +1663,7 @@ def display_enhanced_results(results, system, username):
                                         for layer in available_layers]) / len(available_layers)
                 
                 # Show average improvements
-                st.markdown("### Overall Average Improvements")
+                st.markdown("### Overall Average Improvements", unsafe_allow_html=True)
                 avg_table = {
                     "Metric": ["Standard Deviation", "Feature Entropy", "Mean Activation"],
                     "Average Improvement": [
@@ -1204,13 +1674,13 @@ def display_enhanced_results(results, system, username):
                 }
                 st.table(avg_table)
                 
-                st.markdown("**What do these metrics mean?**")
+                st.markdown("**What do these metrics mean?**", unsafe_allow_html=True)
                 st.markdown("""
                 - **Standard Deviation**: Measures the variability of activations. Higher values in SPEAR-UNet indicate better feature discrimination.
                 - **Feature Entropy**: Quantifies information content in the feature maps. Higher entropy in SPEAR-UNet demonstrates improved information capture.
                 - **Mean Activation**: Average activation level. Differences show how ResNet integration affects feature response.
                 - **Improvement**: Percentage improvement of SPEAR-UNet over Base U-Net. Positive values indicate better performance.
-                """)
+                """, unsafe_allow_html=True)
                     
             # If we found layer visualizations, display them
             if layer_vis:
@@ -1879,7 +2349,7 @@ def main():
             with col1:
                 tomato_card = st.container()
                 with tomato_card:
-                    st.markdown(f"### {fruit_icons['Tomato']} Tomato")
+                    st.markdown(f"### {fruit_icons['Tomato']} Tomato", unsafe_allow_html=True)
                     if st.button("Select Tomato", key="tomato_btn", use_container_width=True):
                         st.session_state.selected_fruit = "Tomato"
                         st.session_state.analysis_step = "upload_image"
@@ -1888,7 +2358,7 @@ def main():
             with col2:
                 pineapple_card = st.container()
                 with pineapple_card:
-                    st.markdown(f"### {fruit_icons['Pineapple']} Pineapple")
+                    st.markdown(f"### {fruit_icons['Pineapple']} Pineapple", unsafe_allow_html=True)
                     if st.button("Select Pineapple", key="pineapple_btn", use_container_width=True):
                         st.session_state.selected_fruit = "Pineapple"
                         st.session_state.analysis_step = "upload_image"
@@ -1897,7 +2367,7 @@ def main():
             with col3:
                 banana_card = st.container()
                 with banana_card:
-                    st.markdown(f"### {fruit_icons['Banana']} Banana")
+                    st.markdown(f"### {fruit_icons['Banana']} Banana", unsafe_allow_html=True)
                     if st.button("Select Banana", key="banana_btn", use_container_width=True):
                         st.session_state.selected_fruit = "Banana"
                         st.session_state.analysis_step = "upload_image"
@@ -1906,7 +2376,7 @@ def main():
             with col4:
                 strawberry_card = st.container()
                 with strawberry_card:
-                    st.markdown(f"### {fruit_icons['Strawberry']} Strawberry")
+                    st.markdown(f"### {fruit_icons['Strawberry']} Strawberry", unsafe_allow_html=True)
                     if st.button("Select Strawberry", key="strawberry_btn", use_container_width=True):
                         st.session_state.selected_fruit = "Strawberry"
                         st.session_state.analysis_step = "upload_image"
@@ -1915,7 +2385,7 @@ def main():
             with col5:
                 mango_card = st.container()
                 with mango_card:
-                    st.markdown(f"### {fruit_icons['Mango']} Mango")
+                    st.markdown(f"### {fruit_icons['Mango']} Mango", unsafe_allow_html=True)
                     if st.button("Select Mango", key="mango_btn", use_container_width=True):
                         st.session_state.selected_fruit = "Mango"
                         st.session_state.analysis_step = "upload_image"
@@ -2052,14 +2522,14 @@ def main():
                 front_col, back_col = st.columns(2)
                 
                 with front_col:
-                    st.markdown("**🔄 Front View**")
+                    st.markdown("**🔄 Front View**", unsafe_allow_html=True)
                     front_file = st.file_uploader("Upload front view", type=["jpg", "jpeg", "png"], key="front")
                     if front_file:
                         # Create a smaller preview
                         st.image(front_file, width=250)
                     
                 with back_col:
-                    st.markdown("**🔄 Back View**")
+                    st.markdown("**🔄 Back View**", unsafe_allow_html=True)
                     back_file = st.file_uploader("Upload back view", type=["jpg", "jpeg", "png"], key="back")
                     if back_file:
                         # Create a smaller preview
@@ -2081,7 +2551,7 @@ def main():
                     top_col, add_bottom_col = st.columns([3, 1])
                     
                     with top_col:
-                        st.markdown("**⬆️ Top View**")
+                        st.markdown("**⬆️ Top View**", unsafe_allow_html=True)
                         top_file = st.file_uploader("Upload top view", type=["jpg", "jpeg", "png"], key="top")
                         if top_file:
                             # Create a smaller preview
@@ -2095,7 +2565,7 @@ def main():
                 
                 # Show bottom view uploader if requested
                 if st.session_state.show_bottom:
-                    st.markdown("**⬇️ Bottom View**")
+                    st.markdown("**⬇️ Bottom View**", unsafe_allow_html=True)
                     bottom_file = st.file_uploader("Upload bottom view", type=["jpg", "jpeg", "png"], key="bottom")
                     if bottom_file:
                         # Create a smaller preview
@@ -2245,8 +2715,7 @@ def main():
                         progress_bar.progress(100)
                         status_text.text("Enhanced analysis complete!")
                         
-                        # Use the enhanced display function
-                        display_enhanced_results(results, system, username)
+                        display_card_ripeness_results(results, system, username)
                     elif use_segmentation:
                         status_text.text(f"Processing {st.session_state.selected_fruit} image with segmentation...")
                         progress_bar.progress(25)
