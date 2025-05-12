@@ -280,11 +280,27 @@ def display_card_ripeness_results(results, system, username):
                 metrics = results["mask_metrics"]
                 st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
                 st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
+                
+        try:
+            from gradcam_implementation import add_gradcam_to_technical_details
+            
+            add_gradcam_to_technical_details(st, results, system)
+        except Exception as e:
+            st.warning(f"Could not add Grad-CAM visualization: {str(e)}")
+            import traceback
+            st.text(traceback.format_exc())
         
         # Add model information
         st.subheader("Model Information")
         st.write(f"- Device used: {system.device}")
         st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
+        # Add classification model details if available
+        if "classification_results" in results:
+            if isinstance(results["classification_results"], list) and len(results["classification_results"]) > 0:
+                first_result = results["classification_results"][0]
+                if isinstance(first_result, dict):
+                    st.write(f"- Classification model: {first_result.get('model_name', 'Custom Model')}")
+                    st.write(f"- Classification model input size: {first_result.get('input_size', '224x224')}")
     
     # Save results section
     if username and username != "guest":
