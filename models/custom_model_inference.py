@@ -68,12 +68,11 @@ class CustomModelInference:
             "model_arch": "convnext_tiny",
             "num_classes": 3,  # Assuming 3 classes: Unripe, Ripe, Overripe
             "class_names": ["Unripe", "Ripe", "Overripe"],  # Update if your classes are different
-            "use_timm": True,  # The training script uses timm implementation
+            "use_timm": False,  # The training script uses timm implementation
             "drop_rate": 0.3,  # Matches the training config
             "drop_path_rate": 0.2  # Called 'stochastic_depth' in the training config
         }
         
-        # Add new tomato model configuration
         self.model_configs["mango"] = {
             "repo_id": "TentenPolllo/mango",  # Update with your actual repo once published
             "filename": "best_mango_model.pth",
@@ -104,14 +103,23 @@ class CustomModelInference:
         
     
     def _create_model(self, model_config):
-        """Create model architecture based on configuration"""
+        """Create model architecture based on configuration - FIXED VERSION"""
         num_classes = model_config.get("num_classes", 3)
         
         if model_config["model_arch"] == "convnext_tiny":
-            # Check if we should use timm implementation (for pineapple) or torchvision (for strawberry)
-            if model_config.get("use_timm", False):
+            # For tomato model, use the exact same architecture as in your training script
+            if model_config.get("repo_id", "").lower() == "tentenpolllo/tomato":
+                # Create model using torchvision (matches your training script)
+                model = models.convnext_tiny(weights=None)
+                
+                # Replace the classifier head to match your training script exactly
+                in_features = model.classifier[-1].in_features
+                model.classifier[-1] = nn.Linear(in_features, num_classes)
+                
+                print("Created tomato model with matching architecture from training script")
+            elif model_config.get("use_timm", False):
+                # Original code for timm models (unchanged)
                 try:
-                    # Use timm implementation like in training
                     model = timm_convnext_tiny(
                         pretrained=False, 
                         drop_rate=model_config.get("drop_rate", 0.3),
@@ -135,7 +143,7 @@ class CustomModelInference:
                         nn.Linear(128, num_classes)
                     )
             else:
-                # Use torchvision implementation (for backward compatibility)
+                # Original code for torchvision models (unchanged)
                 model = models.convnext_tiny(weights=None)
                 model.classifier = nn.Sequential(
                     nn.Flatten(),
@@ -262,7 +270,7 @@ class CustomModelInference:
     
     def classify_image(self, image, fruit_type):
         """
-        Classify an image using the appropriate model for the fruit type
+        Classify an image using the appropriate model for the fruit type - FIXED VERSION
         
         Args:
             image: PIL Image
@@ -301,13 +309,18 @@ class CustomModelInference:
             with torch.no_grad():
                 outputs = model(img_tensor)
                 
-                # ===== ADDED: Temperature scaling for mangoes =====
-                if fruit_type == "mango":
-                    temperature = 3.0  # Higher value = more uniform distribution
-                    outputs = outputs / temperature
-                # ================================================
-                
-                probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
+                # ===== CRITICAL FIX: Use sigmoid for tomato model (multi-label) =====
+                if fruit_type == "tomato":
+                    # Use sigmoid for tomato model (matches your training)
+                    probabilities = torch.sigmoid(outputs)[0]
+                else:
+                    # Use temperature scaling for mangoes
+                    if fruit_type == "mango":
+                        temperature = 3.0  # Higher value = more uniform distribution
+                        outputs = outputs / temperature
+                        
+                    # Use softmax for other models
+                    probabilities = torch.nn.functional.softmax(outputs, dim=1)[0]
             
             # Convert to dictionary
             class_names = model_config["class_names"]
@@ -318,8 +331,9 @@ class CustomModelInference:
                     # Use standardized ripeness labels if possible
                     class_name = class_names[i]
                     
-                    # ===== MODIFIED: Special handling for mangoes =====
+                    # Special handling for different fruits
                     if fruit_type == "mango":
+                        # Original mango handling
                         if class_name.lower() in ["unripe", "unripe-1-20-", "early_ripe-21-40-"]:
                             label = "Unripe"
                         elif class_name.lower() in ["semiripe", "semi-ripe", "partially_ripe-41-60-", "semi_ripe", "underripe"]:
@@ -331,7 +345,7 @@ class CustomModelInference:
                         else:
                             label = class_name
                     else:
-                        # Original code for other fruits
+                        # Handle other fruits including tomato
                         if class_name.lower() in ["unripe", "strawberryunripe", "green"]:
                             label = "Unripe"
                         elif class_name.lower() in ["ripe", "strawberryripe", "red"]:
@@ -340,13 +354,12 @@ class CustomModelInference:
                             label = "Overripe"
                         else:
                             label = class_name
-                    # ================================================
                     
                     confidences[label] = prob.item()
                 else:
                     confidences[f"Class_{i}"] = prob.item()
             
-            # ===== ADDED: Post-processing for mangoes =====
+            # Post-processing for mangoes
             if fruit_type == "mango":
                 # Ensure minimum probability values
                 for key in confidences:
@@ -357,7 +370,12 @@ class CustomModelInference:
                 if total > 0:
                     for key in confidences:
                         confidences[key] /= total
-            # ===============================================
+            
+            # ===== NEW: Debug output for tomato model =====
+            if fruit_type == "tomato":
+                print(f"Tomato classification raw outputs: {outputs[0].cpu().numpy()}")
+                print(f"Tomato classification probabilities (sigmoid): {probabilities.cpu().numpy()}")
+                print(f"Tomato classification results: {confidences}")
             
             return confidences
             
@@ -365,6 +383,7 @@ class CustomModelInference:
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
+
     
     def test_model(self, image_path, fruit_type):
         """
