@@ -2435,7 +2435,7 @@ def main():
                                                 help="Use the two-stage analysis approach with detailed confidence distributions")
                 
                 # ADD FRUIT VERIFICATION OPTION
-                verify_fruit_type = st.checkbox("Enable Fruit Type Verification", value=True,
+                verify_fruit_type = st.checkbox("Enable Fruit Type Verification", value=False,
                                              help="Verify that the uploaded image contains the selected fruit type")
                 
                 if use_segmentation:
