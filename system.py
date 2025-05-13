@@ -238,7 +238,7 @@ class FruitRipenessSystem:
         }
         
         self.classification_models = {
-            "banana": {"type": "custom", "model_id": "banana"},
+            "banana": {"type": "custom", "model_key": "banana"},
             "mango": {"type": "custom", "model_key": "mango"},
             "tomato": {"type": "custom", "model_key": "tomato"},
             "strawberry": {"type": "custom", "model_key": "strawberry"},
