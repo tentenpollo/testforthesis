@@ -283,12 +283,13 @@ def display_card_ripeness_results(results, system, username):
                 
         try:
             from gradcam_implementation import add_gradcam_to_technical_details
-            
+            print("Adding Grad-CAM visualizations...")
             add_gradcam_to_technical_details(st, results, system)
         except Exception as e:
             st.warning(f"Could not add Grad-CAM visualization: {str(e)}")
             import traceback
             st.text(traceback.format_exc())
+            print(traceback.format_exc())
         
         # Add model information
         st.subheader("Model Information")
@@ -307,7 +308,189 @@ def display_card_ripeness_results(results, system, username):
         save_user_results(results, username)
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
+        
+def display_patch_based_card_ripeness_results(combined_results, system, username):
+    """Display ripeness analysis results in a card format with percentages for patch-based analysis"""
+    if "error" in combined_results and "fruits_data" not in combined_results:
+        st.error(f"Error: {combined_results['error']}")
+        return
+    
+    # Get basic info from results
+    use_segmentation = combined_results.get("use_segmentation", True)
+    fruit_type = combined_results.get("fruit_type", "Unknown")
+    num_fruits = combined_results.get("num_fruits", 0)
+    num_angles = combined_results.get("num_angles", 0)
+    
+    # Display header with fruit emoji
+    fruit_emoji = get_fruit_emoji(fruit_type)
+    st.header(f"{fruit_emoji} {fruit_type.title()} Multi-Angle Analysis")
+    
+    # Display front and back images side by side 
+    if "angle_results" in combined_results and len(combined_results["angle_results"]) >= 2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Front View")
+            st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
+        
+        with col2:
+            st.subheader("Back View")
+            st.image(combined_results["angle_results"][1]["original_image"], use_container_width=True)
+    
+    # Display additional angles if available
+    if "angle_results" in combined_results and len(combined_results["angle_results"]) > 2:
+        additional_angles = []
+        for i in range(2, len(combined_results["angle_results"])):
+            additional_angles.append(combined_results["angle_names"][i])
+        
+        st.write(f"**Additional angles analyzed:** {', '.join(additional_angles)}")
+    
+    # Combined ripeness result
+    st.subheader("Combined Ripeness Assessment")
+    st.write(f"Based on analysis of {len(combined_results['angle_results'])} angles")
+    
+    # Get the combined confidence distribution
+    confidence_distribution = {}
+    if "ripeness_predictions" in combined_results:
+        for pred in combined_results["ripeness_predictions"]:
+            confidence_distribution[pred["ripeness"]] = pred["confidence"]
+    
+    # Get fruit data for the ripeness prediction
+    fruit_data = {}
+    if "fruits_data" in combined_results:
+        fruit_data = combined_results["fruits_data"][0]
+    elif "angle_results" in combined_results and "fruits_data" in combined_results["angle_results"][0]:
+        fruit_data = combined_results["angle_results"][0]["fruits_data"][0]
+    
+    # Get ripeness assessment and percentages
+    ripeness_level, confidence, all_percentages = get_ripeness_with_percentages(confidence_distribution)
+    
+    # Create main card container
+    with st.container():
+        # Header row with fruit image and title (use images from all angles)
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            images_row = st.columns(min(len(combined_results["angle_results"]), 5))
+            
+            for i, (col, angle_result) in enumerate(zip(images_row, combined_results["angle_results"])):
+                angle_name = combined_results["angle_names"][i]
+                with col:
+                    if "masked_crop_path" in angle_result and os.path.exists(angle_result["masked_crop_path"]):
+                        img = Image.open(angle_result["masked_crop_path"])
+                        st.image(img, width=120)
+                    elif "fruits_data" in angle_result and len(angle_result["fruits_data"]) > 0 and "masked_crop_path" in angle_result["fruits_data"][0]:
+                        img = Image.open(angle_result["fruits_data"][0]["masked_crop_path"])
+                        st.image(img, width=120)
+        
+        # Ripeness indicator
+        ripeness_icon = get_ripeness_icon(ripeness_level)
+        st.markdown(f"## {ripeness_icon} {ripeness_level} ({confidence*100:.1f}%)")
+        
+        # Assessment section
+        st.markdown("## Assessment & Recommendations")
+        
+        # Create three columns for assessment sections
+        col1, col2, col3 = st.columns(3)
+        
+        # Condition column
+        with col1:
+            st.markdown("### Condition")
+            condition_text = get_condition_text(ripeness_level, fruit_type)
+            st.markdown(condition_text)
+            
+            # Add a colored box or indicator based on ripeness
+            if ripeness_level == "Ripe":
+                st.success("Optimal condition")
+            elif ripeness_level == "Unripe":
+                st.warning("Not ready yet")
+            elif ripeness_level == "Overripe":
+                st.error("Past prime condition")
+            else:
+                st.info("Condition unknown")
+        
+        # Shelf Life column
+        with col2:
+            st.markdown("### Shelf Life")
+            shelf_life = get_shelf_life(ripeness_level, fruit_type)
+            shelf_icon = get_shelf_life_icon(ripeness_level)
+            st.markdown(f"{shelf_icon} {shelf_life}")
+            
+            # Add a visual indicator
+            if ripeness_level == "Ripe":
+                st.warning("Limited time remaining")
+            elif ripeness_level == "Unripe":
+                st.success("Good shelf life")
+            elif ripeness_level == "Overripe":
+                st.error("Use immediately")
+            else:
+                st.info("Shelf life unknown")
+        
+        # Recommendation column
+        with col3:
+            st.markdown("### Recommendation")
+            recommendation = get_recommendation(ripeness_level, fruit_type)
+            rec_icon = get_recommendation_icon(ripeness_level)
+            st.markdown(f"{rec_icon} {recommendation}")
+            
+            # Add action button or suggestion
+            if ripeness_level == "Ripe":
+                st.success("Ready to eat")
+            elif ripeness_level == "Unripe":
+                st.info("Wait before consuming")
+            elif ripeness_level == "Overripe":
+                st.warning("Cooking recommended")
+            else:
+                st.info("No specific recommendation")
 
+    # Technical details in an expander
+    with st.expander("Technical Details"):
+        
+        # Display confidence distributions for the combined result
+        if confidence_distribution and "error" not in confidence_distribution:
+            st.subheader("Combined Ripeness Confidence Distribution")
+            
+            # Filter out non-confidence keys
+            filtered_distribution = {k: v for k, v in confidence_distribution.items() 
+                                  if k not in ["error", "estimated"]}
+            
+            # Create table
+            confidence_data = {
+                "Ripeness Level": list(filtered_distribution.keys()),
+                "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
+                "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+            }
+            
+            st.table(confidence_data)
+        
+        # Add GradCAM visualizations for each angle - REPLACE WITH NEW IMPLEMENTATION
+        try:
+            # Use the new card-based implementation for GradCAM
+            from gradcam_implementation import add_gradcam_to_card_technical_details
+            # Simply pass the entire combined_results object to the new function
+            add_gradcam_to_card_technical_details(st, combined_results, system)
+        except Exception as e:
+            st.warning(f"Could not add Grad-CAM visualization: {str(e)}")
+            import traceback
+            st.text(traceback.format_exc())
+        
+        # Add model information
+        st.subheader("Model Information")
+        st.write(f"- Device used: {system.device}")
+        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
+        st.write(f"- Number of angles analyzed: {num_angles}")
+        
+        if "classification_results" in combined_results:
+            if isinstance(combined_results["classification_results"], list) and len(combined_results["classification_results"]) > 0:
+                first_result = combined_results["classification_results"][0]
+                if isinstance(first_result, dict):
+                    st.write(f"- Classification model: {first_result.get('model_name', 'Custom Model')}")
+                    st.write(f"- Classification model input size: {first_result.get('input_size', '224x224')}")
+    
+    # Save results section
+    if username and username != "guest":
+        save_user_results(combined_results, username)
+    else:
+        st.info("💡 Log in with a user account to save your analysis results for future reference.")
+        
 def display_ripeness_card(fruit_data, confidence_distribution, fruit_type, fruit_number=None):
     """Display fruit ripeness information with a clean, functional layout"""
     
@@ -879,11 +1062,10 @@ def process_angle_image(system, image_file, fruit_type, angle_name, use_segmenta
         if use_enhanced_analysis:
             results = system.analyze_ripeness_enhanced(
                 image_file,
-                fruit_type=fruit_type,
-                is_patch_based=True,  # Flag as patch-based but still use object detection
-                use_segmentation=use_segmentation  # Pass the user's segmentation preference
+                fruit_type=st.session_state.selected_fruit.lower(),
+                use_segmentation=use_segmentation,
+                verify_fruit_type=st.session_state.verify_fruit_type  # Add this parameter
             )
-            # Add angle name to results
             results["angle_name"] = angle_name
             return results
         elif use_segmentation:
@@ -2026,143 +2208,154 @@ def display_patch_based_results(combined_results, system, use_segmentation, user
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
 def display_enhanced_patch_based_results(combined_results, system, username):
-    """Display enhanced patch-based results, aligned with display_enhanced_results"""
+    """Display enhanced patch-based results with card style format"""
     if "error" in combined_results and "angle_results" not in combined_results:
         st.error(f"Error: {combined_results['error']}")
         return
     
     use_segmentation = combined_results.get("use_segmentation", True)
-                                            
     fruit_type = combined_results.get("fruit_type", "Unknown")
     num_angles = combined_results.get("num_angles", 0)
     
-    # Header section similar to display_enhanced_results
-    st.header(f"🍎 {fruit_type.title()} Ripeness Analysis")
-    st.write(f"Analyzed {num_angles} angles with enhanced two-stage analysis")
+    # Combined ripeness result
+    st.subheader("Combined Ripeness Assessment")
+    st.write(f"Based on analysis of {len(combined_results['angle_results'])} angles")
     
-    # Main content columns
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Original Image (Front View)")
-        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
-            st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
-    
-    with col2:
-        if use_segmentation:
-            st.subheader("Segmented Image (Front View)")
-            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
-                st.image(combined_results["angle_results"][0]["segmented_image"], use_container_width=True)
-        else:
-            st.subheader("Processed Image (No Segmentation)")
-            if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
-                if "visualizations" in combined_results["angle_results"][0] and "bounding_box_visualization" in combined_results["angle_results"][0]["visualizations"]:
-                    bbox_path = combined_results["angle_results"][0]["visualizations"]["bounding_box_visualization"]
-                    try:
-                        bbox_img = Image.open(bbox_path)
-                        st.image(bbox_img, use_container_width=True)
-                    except:
-                        st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
-                else:
-                    st.image(combined_results["angle_results"][0]["original_image"], use_container_width=True)
-        
-    # Combined ripeness analysis
-    st.subheader("Combined Ripeness Analysis")
-    
-    if "ripeness_predictions" in combined_results and combined_results["ripeness_predictions"]:
-        ripeness_data = {
-            "Ripeness Level": [],
-            "Average Confidence": []
+    # Create a modified results dict that has the structure expected by display_card_ripeness_results
+    if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+        # Prepare the card results with structure needed for display_card_ripeness_results
+        card_results = {
+            "use_segmentation": use_segmentation,
+            "fruit_type": fruit_type,
+            "num_fruits": 1,  # Typically 1 fruit in multi-angle analysis
+            "original_image": combined_results["angle_results"][0]["original_image"],
+            "segmented_image": combined_results["angle_results"][0]["segmented_image"] if use_segmentation else None,
         }
         
-        for pred in combined_results["ripeness_predictions"]:
-            ripeness_data["Ripeness Level"].append(pred["ripeness"])
-            ripeness_data["Average Confidence"].append(f"{pred['confidence']:.2f}")
+        # Set up fruit data from first angle
+        fruit_data = {}
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            first_angle = combined_results["angle_results"][0]
+            if "fruits_data" in first_angle and len(first_angle["fruits_data"]) > 0:
+                fruit_data = first_angle["fruits_data"][0].copy()
         
-        st.table(ripeness_data)
-    
-    # Angle-specific tabs
-    st.subheader("Angle-Specific Analysis")
-    angle_tabs = st.tabs(combined_results["angle_names"])
-    
-    for i, (tab, angle_result) in enumerate(zip(angle_tabs, combined_results["angle_results"])):
-        with tab:
-            angle_name = combined_results["angle_names"][i]
+        # Convert ripeness_predictions to confidence_distribution format 
+        confidence_distribution = {}
+        if "ripeness_predictions" in combined_results:
+            for pred in combined_results["ripeness_predictions"]:
+                confidence_distribution[pred["ripeness"]] = pred["confidence"]
+        
+        # For enhanced analysis we need confidence_distributions
+        card_results["fruits_data"] = [fruit_data]
+        card_results["confidence_distributions"] = [confidence_distribution]
+        
+        # Add visualizations if available
+        if "visualizations" not in card_results:
+            card_results["visualizations"] = {}
+        
+        # Copy visualizations from first angle
+        if "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
+            first_angle = combined_results["angle_results"][0]
+            if "visualizations" in first_angle:
+                for key, value in first_angle["visualizations"].items():
+                    card_results["visualizations"][key] = value
+        
+        # Add mask if segmentation is used
+        if use_segmentation and "angle_results" in combined_results and "mask" in combined_results["angle_results"][0]:
+            card_results["mask"] = combined_results["angle_results"][0]["mask"]
             
-            # Display images for this angle
-            angle_col1, angle_col2 = st.columns(2)
-            
-            with angle_col1:
-                st.subheader(f"Original {angle_name}")
-                st.image(angle_result["original_image"], use_container_width=True)
-            
-            with angle_col2:
-                if use_segmentation:
-                    st.subheader(f"Segmented {angle_name}")
-                    st.image(angle_result["segmented_image"], use_container_width=True)
-                else:
-                    st.subheader(f"Processed {angle_name}")
-                    if "visualizations" in angle_result and "bounding_box_visualization" in angle_result["visualizations"]:
-                        bbox_path = angle_result["visualizations"]["bounding_box_visualization"]
-                        try:
-                            bbox_img = Image.open(bbox_path)
-                            st.image(bbox_img, use_container_width=True)
-                        except:
-                            st.image(angle_result["original_image"], use_container_width=True)
-                    else:
-                        st.image(angle_result["original_image"], use_container_width=True)
-            
-            # Display confidence distributions for this angle
-            if "confidence_distributions" in angle_result:
-                st.subheader(f"{angle_name} Confidence Distribution")
-                
-                if len(angle_result["confidence_distributions"]) > 1:
-                    # Multiple fruits in this angle
-                    fruit_tabs = st.tabs([f"Fruit #{j+1}" for j in range(len(angle_result["confidence_distributions"]))])
-                    
-                    for j, (fruit_tab, distribution) in enumerate(zip(fruit_tabs, angle_result["confidence_distributions"])):
-                        with fruit_tab:
-                            if distribution and "error" not in distribution:
-                                viz_path = visualize_confidence_distribution(
-                                    {},  # Pass empty dict since we don't have fruit_data here
-                                    distribution,
-                                    fruit_type
-                                )
-                                viz_img = Image.open(viz_path)
-                                st.image(viz_img, use_container_width=True)
-                else:
-                    # Single fruit in this angle
-                    distribution = angle_result["confidence_distributions"][0]
-                    if distribution and "error" not in distribution:
-                        viz_path = visualize_confidence_distribution(
-                            {},
-                            distribution,
-                            fruit_type
-                        )
-                        viz_img = Image.open(viz_path)
-                        st.image(viz_img, use_container_width=True)
-    
-    with st.expander("Technical Details"):
-        if use_segmentation and "angle_results" in combined_results and len(combined_results["angle_results"]) > 0:
-            st.write("**Segmentation Mask (Front View):**")
-            st.image(combined_results["angle_results"][0]["mask"] * 255, clamp=True, use_container_width=True)
-            
+            # Add mask metrics if available
             if "mask_metrics" in combined_results["angle_results"][0]:
-                st.write("**Mask Quality Metrics:**")
-                metrics = combined_results["angle_results"][0]["mask_metrics"]
-                st.write(f"- Mask coverage: {metrics['coverage_ratio']:.2%} of image")
-                st.write(f"- Boundary complexity: {metrics['boundary_complexity']:.2f}")
-        else:
-            st.write("**Note:** Segmentation was disabled for this analysis.")
+                card_results["mask_metrics"] = combined_results["angle_results"][0]["mask_metrics"]
         
-        st.write("**Model Processing Information:**")
-        st.write(f"- Device used: {system.device}")
-        st.write(f"- Two-Stage Analysis: Enabled")
-        st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
-        st.write(f"- Segmentation model input size: 256x256")
-        st.write(f"- Classification model input size: 224x224")
+        display_patch_based_card_ripeness_results(combined_results, system, username)
     
-    # Save results section - similar to display_enhanced_results
+    # Add the multi-angle specific display in an expander
+    with st.expander("Angle-Specific Analysis Details"):
+        angle_tabs = st.tabs(combined_results["angle_names"])
+        
+        for i, (tab, angle_result) in enumerate(zip(angle_tabs, combined_results["angle_results"])):
+            with tab:
+                angle_name = combined_results["angle_names"][i]
+                
+                # Display images for this angle
+                angle_col1, angle_col2 = st.columns(2)
+                
+                with angle_col1:
+                    st.subheader(f"Original {angle_name}")
+                    st.image(angle_result["original_image"], use_container_width=True)
+                
+                with angle_col2:
+                    if use_segmentation:
+                        st.subheader(f"Segmented {angle_name}")
+                        st.image(angle_result["segmented_image"], use_container_width=True)
+                    else:
+                        st.subheader(f"Processed {angle_name}")
+                        if "visualizations" in angle_result and "bounding_box_visualization" in angle_result["visualizations"]:
+                            bbox_path = angle_result["visualizations"]["bounding_box_visualization"]
+                            try:
+                                bbox_img = Image.open(bbox_path)
+                                st.image(bbox_img, use_container_width=True)
+                            except:
+                                st.image(angle_result["original_image"], use_container_width=True)
+                        else:
+                            st.image(angle_result["original_image"], use_container_width=True)
+                
+                # Display confidence distributions for this angle
+                if "confidence_distributions" in angle_result:
+                    st.subheader(f"{angle_name} Confidence Distribution")
+                    
+                    if len(angle_result["confidence_distributions"]) > 1:
+                        # Multiple fruits in this angle
+                        fruit_tabs = st.tabs([f"Fruit #{j+1}" for j in range(len(angle_result["confidence_distributions"]))])
+                        
+                        for j, (fruit_tab, distribution) in enumerate(zip(fruit_tabs, angle_result["confidence_distributions"])):
+                            with fruit_tab:
+                                if distribution and "error" not in distribution:
+                                    viz_path = visualize_confidence_distribution(
+                                        {},  # Pass empty dict since we don't have fruit_data here
+                                        distribution,
+                                        fruit_type
+                                    )
+                                    viz_img = Image.open(viz_path)
+                                    st.image(viz_img, use_container_width=True)
+                                    
+                                    # Add table with confidence values
+                                    filtered_distribution = {k: v for k, v in distribution.items() 
+                                                           if k not in ["error", "estimated"]}
+                                    
+                                    confidence_data = {
+                                        "Ripeness Level": list(filtered_distribution.keys()),
+                                        "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
+                                        "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+                                    }
+                                    
+                                    st.table(confidence_data)
+                    else:
+                        # Single fruit in this angle
+                        distribution = angle_result["confidence_distributions"][0]
+                        if distribution and "error" not in distribution:
+                            viz_path = visualize_confidence_distribution(
+                                {},
+                                distribution,
+                                fruit_type
+                            )
+                            viz_img = Image.open(viz_path)
+                            st.image(viz_img, use_container_width=True)
+                            
+                            # Add table with confidence values
+                            filtered_distribution = {k: v for k, v in distribution.items() 
+                                                  if k not in ["error", "estimated"]}
+                            
+                            confidence_data = {
+                                "Ripeness Level": list(filtered_distribution.keys()),
+                                "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
+                                "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
+                            }
+                            
+                            st.table(confidence_data)
+    
+    # Save results section
     if username and username != "guest":
         save_col1, save_col2 = st.columns([3, 1])
         
@@ -2188,11 +2381,28 @@ def display_enhanced_patch_based_results(combined_results, system, username):
                         original_path = f"results/original_{timestamp}.png"
                         first_angle["original_image"].save(original_path)
                         image_paths["original"] = original_path
+                        save_results["original_image_path"] = original_path
                     
                     if isinstance(first_angle.get("segmented_image"), Image.Image):
                         segmented_path = f"results/segmented_{timestamp}.png"
                         first_angle["segmented_image"].save(segmented_path)
                         image_paths["segmented"] = segmented_path
+                        save_results["segmented_image_path"] = segmented_path
+                    
+                    # Save visualizations if available
+                    if "visualizations" in first_angle:
+                        for viz_key, viz_path in first_angle["visualizations"].items():
+                            if viz_path and os.path.exists(viz_path):
+                                image_paths[viz_key] = viz_path
+                
+                # Also save back view for a complete multi-angle representation
+                if len(combined_results["angle_results"]) >= 2:
+                    back_angle = combined_results["angle_results"][1]
+                    if isinstance(back_angle.get("original_image"), Image.Image):
+                        back_path = f"results/back_view_{timestamp}.png"
+                        back_angle["original_image"].save(back_path)
+                        image_paths["back_view"] = back_path
+                        save_results["back_view_path"] = back_path
                 
                 try:
                     result_id = save_enhanced_user_result(username, save_results, image_paths)
@@ -2203,6 +2413,9 @@ def display_enhanced_patch_based_results(combined_results, system, username):
                         st.rerun()
                 except Exception as e:
                     st.error(f"Error saving results: {str(e)}")
+                    # Add detailed error output for debugging
+                    import traceback
+                    st.text(traceback.format_exc())
     else:
         st.info("💡 Log in with a user account to save your analysis results for future reference.")
 
@@ -2698,10 +2911,11 @@ def main():
                         progress_bar.progress(25)
 
                         results = system.analyze_ripeness_enhanced(
-                            image_input,
-                            fruit_type=st.session_state.selected_fruit.lower(),
-                            use_segmentation=use_segmentation
-                        )
+                        image_input,
+                        fruit_type=st.session_state.selected_fruit.lower(),
+                        use_segmentation=use_segmentation,
+                        verify_fruit_type=st.session_state.verify_fruit_type  # Add this parameter
+                    )
                         
                         if "warning" in results and results["warning"] == "fruit_type_mismatch":
                             st.session_state.verification_results = {

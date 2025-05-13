@@ -361,6 +361,11 @@ def add_gradcam_to_technical_details(st, results, system):
         results: Dictionary containing processing results
         system: FruitRipenessSystem instance
     """
+    # Generate a unique base ID for this results object to avoid key conflicts
+    result_base_id = id(results) % 10000
+    
+    print("Starting Grad-CAM visualization process")
+    
     st.subheader("🔍 Grad-CAM Visualization")
     
     st.write("""
@@ -370,6 +375,7 @@ def add_gradcam_to_technical_details(st, results, system):
     
     # If we have multiple fruits, create tabs
     num_fruits = results.get("num_fruits", 1)
+    print(f"Number of fruits detected: {num_fruits}")
     
     if num_fruits > 1 and "fruits_data" in results:
         fruit_tabs = st.tabs([f"Fruit #{i+1}" for i in range(num_fruits)])
@@ -377,6 +383,10 @@ def add_gradcam_to_technical_details(st, results, system):
         for i, (tab, fruit_data) in enumerate(zip(fruit_tabs, results.get("fruits_data", []))):
             with tab:
                 try:
+                    # Generate a unique key for this specific fruit tab
+                    fruit_key = f"fruit_{i}_{result_base_id}"
+                    print(f"Processing Grad-CAM for fruit #{i+1} with key {fruit_key}")
+                    
                     # Get confidence distribution for this fruit
                     confidence_dist = results.get("confidence_distributions", [])[i] if i < len(results.get("confidence_distributions", [])) else {}
                     
@@ -391,15 +401,28 @@ def add_gradcam_to_technical_details(st, results, system):
                         st.warning("No valid ripeness classes found in confidence distribution.")
                         continue
                         
-                    ripeness_class, _ = max(filtered_dist.items(), key=lambda x: x[1])
+                    ripeness_class, confidence = max(filtered_dist.items(), key=lambda x: x[1])
+                    print(f"Selected ripeness class: {ripeness_class} (confidence: {confidence:.2f})")
                     
-                    # Apply improved Grad-CAM 
-                    gradcam_path = apply_improved_gradcam(
-                        system, 
-                        fruit_data, 
-                        results.get("fruit_type", "unknown"),
-                        ripeness_class
-                    )
+                    # Check if we already have a generated Grad-CAM path
+                    existing_path = None
+                    if "gradcam_paths" in results and i < len(results.get("gradcam_paths", [])):
+                        existing_path = results["gradcam_paths"][i]
+                        if existing_path and os.path.exists(existing_path):
+                            print(f"Using existing Grad-CAM path: {existing_path}")
+                    
+                    # Use existing path or generate new one
+                    if existing_path and os.path.exists(existing_path):
+                        gradcam_path = existing_path
+                    else:
+                        print(f"Generating new Grad-CAM visualization for fruit #{i+1}")
+                        # Apply improved Grad-CAM 
+                        gradcam_path = apply_improved_gradcam(
+                            system, 
+                            fruit_data, 
+                            results.get("fruit_type", "unknown"),
+                            ripeness_class
+                        )
                     
                     if gradcam_path and os.path.exists(gradcam_path):
                         # Check if overlay exists (for smaller display)
@@ -418,20 +441,46 @@ def add_gradcam_to_technical_details(st, results, system):
                         Red/yellow areas had stronger influence on the model's prediction.
                         """)
                         
-                        # Add button to view full visualization
-                        if st.button(f"View Full Grad-CAM Analysis for Fruit #{i+1}"):
+                        # Add button to view full visualization with UNIQUE KEY
+                        if st.button(f"View Full Grad-CAM Analysis", key=f"view_gradcam_{fruit_key}"):
                             st.image(Image.open(gradcam_path), use_container_width=True)
                     else:
-                        st.warning("Could not generate Grad-CAM visualization for this fruit.")
+                        # Generate button with unique key for generating Grad-CAM
+                        if st.button("Generate Grad-CAM Visualization", key=f"generate_gradcam_{fruit_key}"):
+                            with st.spinner(f"Generating Grad-CAM for Fruit #{i+1}..."):
+                                try:
+                                    gradcam_path = apply_improved_gradcam(
+                                        system, 
+                                        fruit_data, 
+                                        results.get("fruit_type", "unknown"),
+                                        ripeness_class
+                                    )
+                                    
+                                    if gradcam_path and os.path.exists(gradcam_path):
+                                        st.success("Grad-CAM generated successfully!")
+                                        st.image(Image.open(gradcam_path), use_container_width=True)
+                                    else:
+                                        st.warning("Could not generate Grad-CAM visualization.")
+                                except Exception as e:
+                                    st.error(f"Error generating Grad-CAM: {str(e)}")
+                        else:
+                            st.warning("Click the button above to generate Grad-CAM visualization.")
                         
                 except Exception as e:
-                    st.error(f"Error generating Grad-CAM: {str(e)}")
+                    st.error(f"Error in Grad-CAM processing for fruit #{i+1}: {str(e)}")
+                    print(f"Exception in Grad-CAM for fruit #{i+1}: {str(e)}")
                     import traceback
-                    st.text(traceback.format_exc())
+                    trace = traceback.format_exc()
+                    print(trace)
+                    st.text(trace)
     else:
         # Single fruit case
         try:
             fruit_data = results.get("fruits_data", [])[0] if results.get("fruits_data") else {}
+            
+            # Generate a unique key for this single fruit
+            single_key = f"single_{result_base_id}"
+            print(f"Processing Grad-CAM for single fruit with key {single_key}")
             
             # Get confidence distribution
             confidence_dist = results.get("confidence_distributions", [])[0] if results.get("confidence_distributions") else {}
@@ -447,15 +496,23 @@ def add_gradcam_to_technical_details(st, results, system):
                 st.warning("No valid ripeness classes found in confidence distribution.")
                 return
                 
-            ripeness_class, _ = max(filtered_dist.items(), key=lambda x: x[1])
+            ripeness_class, confidence = max(filtered_dist.items(), key=lambda x: x[1])
+            print(f"Selected ripeness class: {ripeness_class} (confidence: {confidence:.2f})")
             
-            # Apply improved Grad-CAM
-            gradcam_path = apply_improved_gradcam(
-                system, 
-                fruit_data, 
-                results.get("fruit_type", "unknown"),
-                ripeness_class
-            )
+            # Check if we already have a generated Grad-CAM path
+            existing_path = results.get("gradcam_path") if "gradcam_path" in results else None
+            if existing_path and os.path.exists(existing_path):
+                print(f"Using existing Grad-CAM path: {existing_path}")
+                gradcam_path = existing_path
+            else:
+                print("Generating new Grad-CAM visualization for single fruit")
+                # Apply improved Grad-CAM
+                gradcam_path = apply_improved_gradcam(
+                    system, 
+                    fruit_data, 
+                    results.get("fruit_type", "unknown"),
+                    ripeness_class
+                )
             
             if gradcam_path and os.path.exists(gradcam_path):
                 # Check if overlay exists (for smaller display)
@@ -474,13 +531,128 @@ def add_gradcam_to_technical_details(st, results, system):
                 Red/yellow areas had stronger influence on the model's prediction.
                 """)
                 
-                # Add button to view full visualization
-                if st.button("View Full Grad-CAM Analysis"):
+                # Add button to view full visualization with UNIQUE KEY
+                if st.button("View Full Grad-CAM Analysis", key=f"view_gradcam_{single_key}"):
                     st.image(Image.open(gradcam_path), use_container_width=True)
             else:
-                st.warning("Could not generate Grad-CAM visualization.")
+                # Generate button with unique key for generating Grad-CAM
+                if st.button("Generate Grad-CAM Visualization", key=f"generate_gradcam_{single_key}"):
+                    with st.spinner("Generating Grad-CAM visualization..."):
+                        try:
+                            gradcam_path = apply_improved_gradcam(
+                                system, 
+                                fruit_data, 
+                                results.get("fruit_type", "unknown"),
+                                ripeness_class
+                            )
+                            
+                            if gradcam_path and os.path.exists(gradcam_path):
+                                st.success("Grad-CAM generated successfully!")
+                                st.image(Image.open(gradcam_path), use_container_width=True)
+                            else:
+                                st.warning("Could not generate Grad-CAM visualization.")
+                        except Exception as e:
+                            st.error(f"Error generating Grad-CAM: {str(e)}")
+                else:
+                    st.warning("Click the button above to generate Grad-CAM visualization.")
                 
         except Exception as e:
-            st.error(f"Error generating Grad-CAM: {str(e)}")
+            st.error(f"Error in Grad-CAM processing: {str(e)}")
+            print(f"Exception in Grad-CAM for single fruit: {str(e)}")
             import traceback
-            st.text(traceback.format_exc())
+            trace = traceback.format_exc()
+            print(trace)
+            st.text(trace)
+            
+def add_gradcam_to_card_technical_details(st, results, system):
+    """
+    Automatic Grad-CAM visualization for patch-based analysis
+    without requiring button clicks
+    """
+    try:
+        st.subheader("🔍 Grad-CAM Visualizations")
+        
+        # Only proceed if we have angle results
+        if "angle_results" not in results or len(results["angle_results"]) == 0:
+            st.info("No angle results found for Grad-CAM visualization.")
+            return
+        
+        # Get fruit type
+        fruit_type = results.get("fruit_type", "unknown")
+        print(f"Using fruit type: {fruit_type}")
+        
+        # Create columns for angles (max 2)
+        angles_to_show = min(len(results["angle_results"]), 2)
+        cols = st.columns(angles_to_show)
+        
+        # Process each angle
+        for i in range(angles_to_show):
+            with cols[i]:
+                angle_result = results["angle_results"][i]
+                angle_name = results["angle_names"][i] if "angle_names" in results and i < len(results["angle_names"]) else f"Angle {i+1}"
+                
+                st.write(f"### {angle_name}")
+                
+                # Check if we already have a GradCAM image
+                existing_path = None
+                if "gradcam_paths" in results and i < len(results.get("gradcam_paths", [])):
+                    existing_path = results["gradcam_paths"][i]
+                elif "gradcam_path" in angle_result:
+                    existing_path = angle_result["gradcam_path"]
+                
+                # Use existing or generate new
+                if existing_path and os.path.exists(existing_path):
+                    st.image(Image.open(existing_path), use_container_width=True)
+                    st.success(f"Grad-CAM visualization for {angle_name}")
+                else:
+                    with st.spinner(f"Generating Grad-CAM for {angle_name}..."):
+                        # Get fruit data
+                        if "fruits_data" not in angle_result or len(angle_result["fruits_data"]) == 0:
+                            st.error(f"No fruit data found for {angle_name}")
+                            continue
+                        
+                        fruit_data = angle_result["fruits_data"][0]
+                        
+                        # Get ripeness class
+                        ripeness_class = "Ripe"  # Default
+                        
+                        # Try to get the actual class from confidence distributions
+                        if "confidence_distributions" in angle_result and len(angle_result["confidence_distributions"]) > 0:
+                            conf_dist = angle_result["confidence_distributions"][0]
+                            filtered_dist = {k: v for k, v in conf_dist.items() if k not in ["error", "estimated"]}
+                            if filtered_dist:
+                                ripeness_class, _ = max(filtered_dist.items(), key=lambda x: x[1])
+                        
+                        # Generate the GradCAM
+                        try:
+                            gradcam_path = apply_improved_gradcam(
+                                system,
+                                fruit_data,
+                                fruit_type,
+                                ripeness_class
+                            )
+                            
+                            if gradcam_path and os.path.exists(gradcam_path):
+                                # Show the image
+                                st.image(Image.open(gradcam_path), use_container_width=True)
+                                st.success(f"Grad-CAM visualization for {angle_name}")
+                                
+                                # Store paths for future use
+                                if "gradcam_paths" not in results:
+                                    results["gradcam_paths"] = [None] * len(results["angle_results"])
+                                if i < len(results["gradcam_paths"]):
+                                    results["gradcam_paths"][i] = gradcam_path
+                                
+                                angle_result["gradcam_path"] = gradcam_path
+                            else:
+                                st.error(f"Failed to generate Grad-CAM for {angle_name}")
+                        
+                        except Exception as e:
+                            st.error(f"Error generating Grad-CAM: {str(e)}")
+                            import traceback
+                            st.code(traceback.format_exc(), language="python")
+    
+    except Exception as e:
+        st.error(f"Error in Grad-CAM visualization: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc(), language="python")

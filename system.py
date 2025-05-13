@@ -1129,12 +1129,12 @@ class FruitRipenessSystem:
             print(f"Error using Roboflow model: {str(e)}")
             return {"predictions": [], "error": str(e)}
         
-    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False, use_segmentation=True):
+    def analyze_ripeness_enhanced(self, image_path_or_file, fruit_type, is_patch_based=False, use_segmentation=True, verify_fruit_type=True):
         """
         Enhanced ripeness analysis flow with fruit type verification:
         1. Initial segmentation to remove background (if use_segmentation is True)
-        2. Verify fruit type using classifier
-        3. MODIFIED: Always perform object detection for both patch-based and single image modes
+        2. Verify fruit type using classifier (if verify_fruit_type is True)
+        3. Always perform object detection for both patch-based and single image modes
         4. Process detected objects through classification pipeline
         
         Args:
@@ -1142,6 +1142,7 @@ class FruitRipenessSystem:
             fruit_type: Type of fruit to analyze
             is_patch_based: Whether this is part of patch-based analysis
             use_segmentation: Whether to use segmentation or not
+            verify_fruit_type: Whether to verify fruit type matches selected type
         """
         try:
             # Open and preprocess the image
@@ -1191,24 +1192,25 @@ class FruitRipenessSystem:
             # Store original image
             original_img = segmentation_results["original_image"]
             
-            # ----- ADDED: FRUIT TYPE VERIFICATION STEP -----
-            # Use the classifier to verify fruit type
-            detected_fruit_type, confidence, all_probs = self.classify_fruit(segmented_img)
-            
-            if detected_fruit_type.lower() != fruit_type_normalized:
-                print(f"Warning: Detected fruit type '{detected_fruit_type}' doesn't match selected fruit type '{fruit_type_normalized}'")
-                # Return warning result with both types and confidence scores
-                return {
-                    "warning": "fruit_type_mismatch",
-                    "fruit_type_selected": fruit_type_normalized,
-                    "fruit_type_detected": detected_fruit_type.lower(),
-                    "detection_confidence": confidence,
-                    "all_probabilities": all_probs,
-                    "original_image": original_img,
-                    "segmented_image": segmented_img,
-                    "mask": mask,
-                    "suggestion": f"The uploaded image appears to be a {detected_fruit_type.lower()}, not a {fruit_type_normalized}. Please confirm or select the correct fruit type."
-                }
+            # ----- ADDED: FRUIT TYPE VERIFICATION STEP (ONLY IF ENABLED) -----
+            if verify_fruit_type:
+                # Use the classifier to verify fruit type
+                detected_fruit_type, confidence, all_probs = self.classify_fruit(segmented_img)
+                
+                if detected_fruit_type.lower() != fruit_type_normalized:
+                    print(f"Warning: Detected fruit type '{detected_fruit_type}' doesn't match selected fruit type '{fruit_type_normalized}'")
+                    # Return warning result with both types and confidence scores
+                    return {
+                        "warning": "fruit_type_mismatch",
+                        "fruit_type_selected": fruit_type_normalized,
+                        "fruit_type_detected": detected_fruit_type.lower(),
+                        "detection_confidence": confidence,
+                        "all_probabilities": all_probs,
+                        "original_image": original_img,
+                        "segmented_image": segmented_img,
+                        "mask": mask,
+                        "suggestion": f"The uploaded image appears to be a {detected_fruit_type.lower()}, not a {fruit_type_normalized}. Please confirm or select the correct fruit type."
+                    }
             
             # MODIFIED: Always use object detection regardless of mode
             # Prepare segmented image for object detection
