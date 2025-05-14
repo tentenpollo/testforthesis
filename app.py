@@ -713,13 +713,13 @@ def get_shelf_life(ripeness_level, fruit_type):
         if fruit_type.lower() == "banana":
             return "Use immediately or freeze"
         elif fruit_type.lower() == "tomato":
-            return "Use immediately"
+            return "Use immediately or dispose"
         elif fruit_type.lower() == "strawberry":
-            return "Use immediately or freeze"
+            return "Use immediately or freeze or immediately dispose"
         elif fruit_type.lower() == "mango":
-            return "Use immediately or freeze"
+            return "Use immediately or freeze or immediately dispose"
         elif fruit_type.lower() == "pineapple":
-            return "Use immediately"
+            return "Use immediately or dispose appropriately"
         return "Use immediately"
     
     return "Shelf life unknown"
