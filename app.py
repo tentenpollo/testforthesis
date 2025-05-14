@@ -560,7 +560,6 @@ def display_ripeness_card(fruit_data, confidence_distribution, fruit_type, fruit
             else:
                 st.info("Shelf life unknown")
         
-        # Recommendation column
         with col3:
             st.markdown("### Recommendation")
             recommendation = get_recommendation(ripeness_level, fruit_type)
