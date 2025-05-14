@@ -565,8 +565,7 @@ def display_ripeness_card(fruit_data, confidence_distribution, fruit_type, fruit
             recommendation = get_recommendation(ripeness_level, fruit_type)
             rec_icon = get_recommendation_icon(ripeness_level)
             st.markdown(f"{rec_icon} {recommendation}")
-            
-            # Add action button or suggestion
+        
             if ripeness_level == "Ripe":
                 st.success("Ready to eat")
             elif ripeness_level == "Unripe":
@@ -667,13 +666,13 @@ def get_condition_text(ripeness_level, fruit_type):
     
     elif ripeness_level == "Overripe":
         if fruit_type == "banana":
-            return "Brown spots cover most of peel. Very soft and very sweet."
+            return "Brown spots cover most of peel. Very soft and very sweet. Be cautious upon consumption."
         elif fruit_type == "tomato":
             return "Very soft with possible wrinkles. Less acidic but may be mealy."
         elif fruit_type == "strawberry":
-            return "Dark red with soft spots. Very sweet but may be mushy."
+            return "Dark red with soft spots. Very sweet but may be mushy. Be cautious upon consumption."
         elif fruit_type == "mango":
-            return "Very soft with wrinkles. Very sweet but possibly stringy."
+            return "Very soft with wrinkles. Very sweet but possibly stringy. Be cautious upon consumption."
         elif fruit_type == "pineapple":
             return "Orange-yellow color with very soft feel. May taste fermented."
         return "Past optimal consumption window."
@@ -682,46 +681,49 @@ def get_condition_text(ripeness_level, fruit_type):
 
 def get_shelf_life(ripeness_level, fruit_type):
     """Get shelf life information based on ripeness level and fruit type"""
+    fruit = fruit_type.lower()
+    
     if ripeness_level == "Unripe":
-        if fruit_type.lower() == "banana":
-            return "4-5 days at room temperature"
-        elif fruit_type.lower() == "tomato":
-            return "7-10 days at room temperature"
-        elif fruit_type.lower() == "strawberry":
-            return "1-2 days at room temperature"
-        elif fruit_type.lower() == "mango":
-            return "7-14 days at room temperature"
-        elif fruit_type.lower() == "pineapple":
-            return "5-7 days at room temperature"
-        return "Several days as it ripens"
-    
+        if fruit == "banana":
+            return "2 to 7 days at room temperature"
+        elif fruit == "tomato":
+            return "5 to 7 days at room temperature until ripe"
+        elif fruit == "strawberry":
+            return "Strawberries do not ripen after harvest; consume soon"
+        elif fruit == "mango":
+            return "3 to 8 days at room temperature until ripe"
+        elif fruit == "pineapple":
+            return "2 to 3 days at room temperature; minimal ripening after harvest"
+        return "Several days at room temperature until ripe"
+
     elif ripeness_level == "Ripe":
-        if fruit_type.lower() == "banana":
-            return "1-2 days at room temperature"
-        elif fruit_type.lower() == "tomato":
-            return "2-3 days at room temperature"
-        elif fruit_type.lower() == "strawberry":
-            return "1-2 days refrigerated"
-        elif fruit_type.lower() == "mango":
-            return "1-2 days at room temperature"
-        elif fruit_type.lower() == "pineapple":
-            return "1-2 days at room temperature"
-        return "Limited shelf life, consume soon"
-    
+        if fruit == "banana":
+            return "2 to 3 days at room temperature or up to 7 days refrigerated (skin darkens)"
+        elif fruit == "tomato":
+            return "2 to 5 days at room temperature or up to 2 weeks refrigerated"
+        elif fruit == "strawberry":
+            return "3 to 7 days refrigerated; do not store at room temperature"
+        elif fruit == "mango":
+            return "2 to 3 days at room temperature or up to 5 days refrigerated"
+        elif fruit == "pineapple":
+            return "3 to 5 days at room temperature or up to 1 week refrigerated"
+        return "Consume within a few days"
+
     elif ripeness_level == "Overripe":
-        if fruit_type.lower() == "banana":
-            return "Use immediately or freeze"
-        elif fruit_type.lower() == "tomato":
-            return "Use immediately or dispose"
-        elif fruit_type.lower() == "strawberry":
-            return "Use immediately or freeze or immediately dispose"
-        elif fruit_type.lower() == "mango":
-            return "Use immediately or freeze or immediately dispose"
-        elif fruit_type.lower() == "pineapple":
-            return "Use immediately or dispose appropriately"
-        return "Use immediately"
-    
+        if fruit == "banana":
+            return "Use immediately or freeze (lasts 2 months in freezer)"
+        elif fruit == "tomato":
+            return "Use immediately; discard if mushy or moldy"
+        elif fruit == "strawberry":
+            return "Use immediately, freeze, or discard if moldy"
+        elif fruit == "mango":
+            return "Use immediately, freeze, or discard if fermented"
+        elif fruit == "pineapple":
+            return "Use immediately or discard if fermented"
+        return "Use immediately or discard"
+
     return "Shelf life unknown"
+
 
 def get_recommendation(ripeness_level, fruit_type):
     """Get recommendation based on ripeness level and fruit type"""
