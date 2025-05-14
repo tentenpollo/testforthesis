@@ -1218,7 +1218,7 @@ class FruitRipenessSystem:
             segmented_img.save(temp_segmented_path)
             
             # STEP 2: Use Roboflow to detect objects in the segmented image
-            print(f"Detecting fruits using Roboflow model...")
+            print(f"Detecting fruits using model...")
             detection_model_id = self.fruit_to_model.get(fruit_type_normalized)
             if not detection_model_id:
                 raise ValueError(f"No detection model available for {fruit_type}")

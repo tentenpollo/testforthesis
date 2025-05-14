@@ -444,23 +444,6 @@ def display_patch_based_card_ripeness_results(combined_results, system, username
     # Technical details in an expander
     with st.expander("Technical Details"):
         
-        # Display confidence distributions for the combined result
-        if confidence_distribution and "error" not in confidence_distribution:
-            st.subheader("Combined Ripeness Confidence Distribution")
-            
-            # Filter out non-confidence keys
-            filtered_distribution = {k: v for k, v in confidence_distribution.items() 
-                                  if k not in ["error", "estimated"]}
-            
-            # Create table
-            confidence_data = {
-                "Ripeness Level": list(filtered_distribution.keys()),
-                "Confidence": [f"{v:.4f}" for v in filtered_distribution.values()],
-                "Percentage": [f"{v*100:.1f}%" for v in filtered_distribution.values()]
-            }
-            
-            st.table(confidence_data)
-        
         # Add GradCAM visualizations for each angle - REPLACE WITH NEW IMPLEMENTATION
         try:
             # Use the new card-based implementation for GradCAM
