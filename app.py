@@ -3038,8 +3038,7 @@ def main():
                     except Exception as e:
                         # Log error but continue
                         print(f"Error during fruit verification: {str(e)}")
-                
-                # Continue with normal patch-based analysis
+
                 status_text.text(f"Processing {st.session_state.selected_fruit} from multiple angles...")
                 
                 results_front = process_angle_image(
