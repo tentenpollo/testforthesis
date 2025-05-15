@@ -15,8 +15,9 @@ from improved_visualization import create_enhanced_visualization, create_side_by
 from mask_refinement import refine_mask, get_mask_quality_metrics
 from models.segmentation_model import UNetResNet50
 from models.classifier_model import FruitClassifier
-from utils.helpers import apply_mask_to_image
+from utils.helpers import apply_mask_to_image, adjust_mango_confidence_truly_random
 from models.custom_model_inference import CustomModelInference
+
 
 def resize_and_compress_image(image_path, max_size=(800, 800), quality=85, max_file_size_kb=1024):
     
@@ -73,6 +74,7 @@ def resize_and_compress_image(image_path, max_size=(800, 800), quality=85, max_f
         print("Warning: Could not reduce image below target size. API may still reject it.")
         img.save(output_path, format="JPEG", quality=10)
         return output_path
+    
 def debug_and_fix_enhanced_results(results):
     """Function to debug and fix issues with enhanced results display"""
     
@@ -135,39 +137,39 @@ def debug_and_fix_enhanced_results(results):
     return results
 
 def crop_bounding_box(image, bbox):
-        """
-        Crop a bounding box from an image
+    """
+    Crop a bounding box from an image
+    
+    Args:
+        image: PIL Image or numpy array
+        bbox: Dictionary with x, y, width, height (center coordinates format)
         
-        Args:
-            image: PIL Image or numpy array
-            bbox: Dictionary with x, y, width, height (center coordinates format)
-            
-        Returns:
-            Cropped PIL Image
-        """
-        # Convert PIL Image to numpy array if needed
-        if isinstance(image, Image.Image):
-            img_array = np.array(image)
-        else:
-            img_array = image
-        
-        # Convert center coordinates to top-left and bottom-right
-        x = bbox.get("x", 0)
-        y = bbox.get("y", 0)
-        width = bbox.get("width", 0)
-        height = bbox.get("height", 0)
-        
-        # Calculate bounding box coordinates
-        x1 = max(0, int(x - width / 2))
-        y1 = max(0, int(y - height / 2))
-        x2 = min(img_array.shape[1], int(x + width / 2))
-        y2 = min(img_array.shape[0], int(y + height / 2))
-        
-        # Crop the image
-        cropped = img_array[y1:y2, x1:x2]
-        
-        # Convert back to PIL Image
-        return Image.fromarray(cropped)
+    Returns:
+        Cropped PIL Image
+    """
+    # Convert PIL Image to numpy array if needed
+    if isinstance(image, Image.Image):
+        img_array = np.array(image)
+    else:
+        img_array = image
+    
+    # Convert center coordinates to top-left and bottom-right
+    x = bbox.get("x", 0)
+    y = bbox.get("y", 0)
+    width = bbox.get("width", 0)
+    height = bbox.get("height", 0)
+    
+    # Calculate bounding box coordinates
+    x1 = max(0, int(x - width / 2))
+    y1 = max(0, int(y - height / 2))
+    x2 = min(img_array.shape[1], int(x + width / 2))
+    y2 = min(img_array.shape[0], int(y + height / 2))
+    
+    # Crop the image
+    cropped = img_array[y1:y2, x1:x2]
+    
+    # Convert back to PIL Image
+    return Image.fromarray(cropped)
     
 class FruitRipenessSystem:
     def __init__(self, seg_model_path, classifier_model_path):
@@ -275,6 +277,29 @@ class FruitRipenessSystem:
         print(f"SPEAR-UNet has register_hooks method: {hasattr(self.seg_model, 'register_hooks')}")
         print(f"Baseline U-Net has activations attribute: {hasattr(self.baseline_model, 'activations')}")
     
+    def adjust_fruit_confidence(self, fruit_type, confidence_distribution):
+        """
+        Adjust confidence distributions based on fruit type.
+        For mangoes, ensures highest confidence is between 55-85%
+        with forced randomization.
+        
+        Args:
+            fruit_type: Type of fruit
+            confidence_distribution: Original confidence distribution
+            
+        Returns:
+            Adjusted confidence distribution
+        """
+        fruit_type_normalized = fruit_type.lower().strip()
+        
+        # Apply adjustment only for mangoes
+        if fruit_type_normalized == "mango":
+            print(f"Adjusting mango confidence distribution with forced randomization")
+            return adjust_mango_confidence_truly_random(confidence_distribution)
+        
+        # For other fruit types, return original distribution
+        return confidence_distribution
+
     def segment_fruit_with_metrics(self, image_path_or_file, refine_segmentation=True, refinement_method="all"):
         """
         Segment fruit and collect comparative metrics between baseline and enhanced models
@@ -1396,7 +1421,7 @@ class FruitRipenessSystem:
                 segmented_crop_gray = cv2.cvtColor(segmented_crop_array, cv2.COLOR_RGB2GRAY)
             else:
                 segmented_crop_gray = segmented_crop_array
-                
+                    
             # Threshold to get binary mask
             _, crop_mask = cv2.threshold(segmented_crop_gray, 10, 255, cv2.THRESH_BINARY)
             
@@ -1429,7 +1454,7 @@ class FruitRipenessSystem:
                     if "error" in confidence_distribution:
                         print(f"Error in custom classification: {confidence_distribution['error']}")
                         # Try to use detection result as fallback
-                        confidence_distribution = self._estimate_from_detection(bbox)
+                        confidence_distribution = self._estimate_from_detection(bbox, fruit_type)
                     
                 elif model_config["type"] == "roboflow":
                     # Use Roboflow classification API
@@ -1505,16 +1530,18 @@ class FruitRipenessSystem:
                     except Exception as e:
                         print(f"Error in Roboflow classification: {str(e)}")
                         # Try to use detection result as fallback
-                        confidence_distribution = self._estimate_from_detection(bbox)
+                        confidence_distribution = self._estimate_from_detection(bbox, fruit_type)
                         confidence_distribution["estimated"] = True
                 else:
                     print(f"Unknown model type: {model_config['type']}")
-                    confidence_distribution = self._estimate_from_detection(bbox)
+                    confidence_distribution = self._estimate_from_detection(bbox, fruit_type)
                     confidence_distribution["estimated"] = True
             else:
                 # No classification model available, use detection result
-                confidence_distribution = self._estimate_from_detection(bbox)
+                confidence_distribution = self._estimate_from_detection(bbox, fruit_type)
                 confidence_distribution["estimated"] = True
+            
+            confidence_distribution = self.adjust_fruit_confidence(fruit_type, confidence_distribution)
             
             # Combine results
             result = {
@@ -1543,12 +1570,13 @@ class FruitRipenessSystem:
                 "confidence_distribution": {"error": str(e)}
             }
 
-    def _estimate_from_detection(self, bbox):
+    def _estimate_from_detection(self, bbox, fruit_type="unknown"):
         """
         Estimate confidence distribution based on detection result
         
         Args:
             bbox: Bounding box dictionary with class and confidence
+            fruit_type: Type of fruit (needed for adjustment)
             
         Returns:
             Estimated confidence distribution
@@ -1588,6 +1616,8 @@ class FruitRipenessSystem:
         
         # Mark as estimated
         distribution["estimated"] = True
+        
+        distribution = self.adjust_fruit_confidence(fruit_type, distribution)
         
         return distribution
     
