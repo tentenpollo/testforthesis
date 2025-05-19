@@ -783,6 +783,30 @@ def save_user_results(results, username):
             # Add analysis type info
             save_results["analysis_type"] = "enhanced"
             
+            # IMPORTANT: Add this code to extract ripeness predictions
+            if "ripeness_predictions" not in save_results and "confidence_distributions" in save_results:
+                # Extract ripeness predictions from confidence distributions
+                ripeness_predictions = []
+                for dist in save_results["confidence_distributions"]:
+                    if isinstance(dist, dict):
+                        # Find highest confidence ripeness level
+                        filtered_dist = {k: v for k, v in dist.items() 
+                                      if k not in ["error", "estimated"]}
+                        if filtered_dist:
+                            max_ripeness = max(filtered_dist.items(), key=lambda x: x[1])
+                            ripeness_predictions.append({
+                                "ripeness": max_ripeness[0],
+                                "confidence": max_ripeness[1]
+                            })
+                
+                if ripeness_predictions:
+                    save_results["ripeness_predictions"] = ripeness_predictions
+                    
+                    # Also add primary ripeness for easier retrieval
+                    if ripeness_predictions:
+                        save_results["primary_ripeness"] = ripeness_predictions[0]["ripeness"]
+                        save_results["primary_confidence"] = ripeness_predictions[0]["confidence"]
+            
             # Save image paths
             image_paths = {}
             timestamp = int(time.time())
@@ -804,6 +828,12 @@ def save_user_results(results, username):
                 save_results["segmented_image_path"] = segmented_path
             elif "segmented_image_path" in results:
                 image_paths["segmented"] = results["segmented_image_path"]
+            
+            # Save visualization images if available
+            if "visualizations" in results:
+                for viz_key, viz_path in results["visualizations"].items():
+                    if os.path.exists(viz_path):
+                        image_paths[viz_key] = viz_path
             
             try:
                 # Save the results
@@ -1979,20 +2009,23 @@ def display_enhanced_results(results, system, username):
                     if os.path.exists(bbox_path):
                         image_paths["bounding_box"] = bbox_path
                 
-                # Save confidence distribution visualizations
-                for i, (fruit_data, distribution) in enumerate(zip(
-                    results.get("fruits_data", []),
-                    results.get("confidence_distributions", [])
-                )):
-                    if distribution and "error" not in distribution:
-                        try:
-                            viz_path = visualize_confidence_distribution(
-                                fruit_data, distribution, fruit_type, 
-                                save_path=f"results/fruit_{i+1}_dist_{timestamp}.png"
-                            )
-                            image_paths[f"fruit_{i+1}_distribution"] = viz_path
-                        except Exception as e:
-                            st.warning(f"Could not save visualization for fruit #{i+1}: {str(e)}")
+                if "ripeness_predictions" not in save_results and "confidence_distributions" in save_results:
+                    # Extract ripeness predictions from confidence distributions
+                    ripeness_predictions = []
+                    for dist in save_results["confidence_distributions"]:
+                        if isinstance(dist, dict):
+                            # Find highest confidence ripeness level
+                            filtered_dist = {k: v for k, v in dist.items() 
+                                        if k not in ["error", "estimated"]}
+                            if filtered_dist:
+                                max_ripeness = max(filtered_dist.items(), key=lambda x: x[1])
+                                ripeness_predictions.append({
+                                    "ripeness": max_ripeness[0],
+                                    "confidence": max_ripeness[1]
+                                })
+                    
+                    if ripeness_predictions:
+                        save_results["ripeness_predictions"] = ripeness_predictions
                 
                 # Save all fruits visualization if multiple fruits
                 if num_fruits > 1:
