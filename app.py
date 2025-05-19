@@ -441,21 +441,16 @@ def display_patch_based_card_ripeness_results(combined_results, system, username
             else:
                 st.info("No specific recommendation")
 
-    # Technical details in an expander
     with st.expander("Technical Details"):
-        
-        # Add GradCAM visualizations for each angle - REPLACE WITH NEW IMPLEMENTATION
+
         try:
-            # Use the new card-based implementation for GradCAM
             from gradcam_implementation import add_gradcam_to_card_technical_details
-            # Simply pass the entire combined_results object to the new function
             add_gradcam_to_card_technical_details(st, combined_results, system)
         except Exception as e:
             st.warning(f"Could not add Grad-CAM visualization: {str(e)}")
             import traceback
             st.text(traceback.format_exc())
-        
-        # Add model information
+
         st.subheader("Model Information")
         st.write(f"- Device used: {system.device}")
         st.write(f"- Segmentation: {'Enabled' if use_segmentation else 'Disabled'}")
